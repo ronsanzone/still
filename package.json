@@ -1,0 +1,45 @@
+{
+  "name": "still",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=26.0.0"
+  },
+  "scripts": {
+    "dev": "node --import tsx src/server/main.ts",
+    "host": "node --import tsx src/host/main.ts",
+    "builder:demo": "node --import tsx tools/builder-demo.ts",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint --threads=2 src test tools/builder-demo.ts vite.config.ts oxlint.config.ts $(if [ -d extensions ]; then printf extensions; fi)",
+    "format": "prettier --write src test *.ts *.json index.html",
+    "test": "vitest run --maxWorkers=2",
+    "check": "npm run typecheck && npm run lint && npm test && npm run build"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.0.2",
+    "@earendil-works/pi-ai": "1.0.2",
+    "@earendil-works/pi-durable": "1.0.2",
+    "effect": "4.0.0",
+    "lucide-react": "1.52.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-markdown": "10.1.0"
+  },
+  "devDependencies": {
+    "@effect/language-service": "0.87.3",
+    "@effect/vitest": "4.0.0",
+    "@oxlint/plugins": "1.86.0",
+    "@types/node": "26.6.4",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "oxlint": "1.86.0",
+    "prettier": "3.9.9",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vite": "8.3.2",
+    "vitest": "5.0.3"
+  }
+}

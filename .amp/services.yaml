@@ -1,0 +1,8 @@
+services:
+  still:
+    command: npm run dev
+    health: /healthz
+    portal:
+      url: /
+      title: Still
+      description: iPhone-first Pi Durable chat prototype. Uses the server's connected model providers.

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$(cat /proc/sys/vm/overcommit_memory)" != "1" ]]; then
+  sudo sysctl -w vm.overcommit_memory=1
+fi
