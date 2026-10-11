@@ -1,0 +1,266 @@
+import { describe, expect, it } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
+import type { ChatSnapshot, Message } from "../src/shared/contracts.ts";
+import {
+  describeChange,
+  summarizeWork,
+  Timeline,
+  timeline,
+} from "../src/client/timeline.tsx";
+import {
+  Composer,
+  sendsOnEnter,
+  type ComposerProps,
+} from "../src/client/composer.tsx";
+import { DecisionCard } from "../src/client/views.tsx";
+
+function message(
+  id: string,
+  role: Message["role"],
+  entry: number | null,
+  text: string,
+  extra: Partial<Message> = {},
+): Message {
+  return {
+    id,
+    entry,
+    before: entry === null ? null : entry - 1,
+    role,
+    text,
+    thinking: "",
+    interrupted: false,
+    failed: false,
+    ...extra,
+  };
+}
+
+function snapshot(extra: Partial<ChatSnapshot> = {}): ChatSnapshot {
+  return {
+    id: 7,
+    title: "Durable writes",
+    model: "faux/faux-1",
+    grant: { kit: "research", target: null },
+    messages: [],
+    busy: false,
+    queued: 0,
+    attachments: [],
+    citations: [],
+    confirmations: [],
+    cost: 0,
+    changes: [],
+    tools: [],
+    ...extra,
+  };
+}
+
+const ask = message("3-0", "user", 3, "Is example.com safe to cite?");
+
+const toolCall = message("4-0", "assistant", 4, "");
+
+const answer = message("7-0", "assistant", 7, "Yes [1].", {
+  model: "faux/faux-1",
+});
+
+const research = snapshot({
+  messages: [ask, toolCall, answer],
+  changes: [{ id: 1, text: "Kit: research" }],
+  tools: [
+    { id: "5", name: "web_search", text: "3 results", failed: false },
+    { id: "5", name: "web_fetch", text: "Fetched", failed: false },
+    { id: "6", name: "web_fetch", text: "Blocked", failed: true },
+  ],
+  citations: [
+    {
+      number: 1,
+      url: "https://example.com/",
+      title: "Example Domain",
+      fetchedAt: "2026-10-11T18:02:11Z",
+    },
+  ],
+});
+
+const noop = () => {};
+
+describe("timeline", () => {
+  it("places changes and grouped tool work between the turns that produced them", () => {
+    const items = timeline(research);
+
+    expect(items.map((item) => item.kind)).toEqual([
+      "change",
+      "message",
+      "work",
+      "message",
+    ]);
+    expect(items[2]?.kind === "work" && items[2].tools.length).toBe(3);
+  });
+
+  it("keeps the live message last and hides tool-call-only assistant entries", () => {
+    const live = message("live", "assistant", null, "Streaming");
+    const items = timeline(snapshot({ messages: [live, ask, toolCall] }));
+
+    expect(
+      items.map((item) =>
+        item.kind === "message" ? item.message.id : item.kind,
+      ),
+    ).toEqual(["3-0", "live"]);
+  });
+
+  it("summarizes work in one line and keeps failures countable", () => {
+    expect(summarizeWork(research.tools)).toEqual({
+      summary: "Searched 1 time · read 2 pages",
+      failed: 1,
+    });
+    expect(describeChange("Kit: research")).toBe("Switched to Research kit");
+    expect(describeChange("Model: opencode-go/space-bunny-free")).toBe(
+      "Model set to space-bunny-free",
+    );
+  });
+});
+
+describe("Timeline rendering", () => {
+  it("shows the answer, a collapsed work line and numbered sources", () => {
+    const html = renderToStaticMarkup(
+      <Timeline
+        snapshot={research}
+        parentTitle={null}
+        locked={false}
+        onFork={noop}
+        onOpenParent={noop}
+      />,
+    );
+
+    expect(html).toContain('<details class="work-summary">');
+    expect(html).toContain("1 blocked or failed");
+    expect(html).toContain('aria-label="Sources and files"');
+    expect(html).toContain('href="https://example.com/"');
+    expect(html.indexOf("Yes [1].")).toBeLessThan(html.indexOf("Sources"));
+  });
+
+  it("offers retry in a branch for a failed answer and marks branches", () => {
+    const html = renderToStaticMarkup(
+      <Timeline
+        snapshot={snapshot({
+          parent: 3,
+          messages: [ask, message("4-0", "assistant", 4, "", { failed: true })],
+        })}
+        parentTitle="Original chat"
+        locked={false}
+        onFork={noop}
+        onOpenParent={noop}
+      />,
+    );
+
+    expect(html).toContain("Retry in a new branch");
+    expect(html).toContain("Branch of");
+    expect(html).toContain("Original chat");
+  });
+
+  it("shows thinking while busy with no answer text yet", () => {
+    const html = renderToStaticMarkup(
+      <Timeline
+        snapshot={snapshot({ busy: true, messages: [ask] })}
+        parentTitle={null}
+        locked
+        onFork={noop}
+        onOpenParent={noop}
+      />,
+    );
+
+    expect(html).toContain('role="status"');
+    expect(html).toContain("Thinking…");
+  });
+});
+
+const composer: ComposerProps = {
+  draft: "Also cover NORMAL",
+  onDraft: noop,
+  models: [{ id: "faux/faux-1", name: "Scripted faux", provider: "faux" }],
+  model: "faux/faux-1",
+  onModel: noop,
+  kit: "chat",
+  onKit: noop,
+  canChooseStill: false,
+  cost: 0.00042,
+  busy: false,
+  queued: 0,
+  whenBusy: "followUp",
+  onWhenBusy: noop,
+  uploads: [],
+  onUploads: noop,
+  onPreparing: noop,
+  preparing: false,
+  locked: false,
+  pending: false,
+  sending: false,
+  reusing: false,
+  onSend: noop,
+  onStop: noop,
+  onError: noop,
+};
+
+describe("Composer", () => {
+  it("is a plain send with model, kit and cost chips when idle", () => {
+    const html = renderToStaticMarkup(<Composer {...composer} />);
+
+    expect(html).toContain('aria-label="Send"');
+    expect(html).not.toContain("Stop answer");
+    expect(html).toContain('aria-label="Model"');
+    expect(html).toContain('aria-label="Kit"');
+    expect(html).toContain("$0.0004");
+    expect(html).toMatch(/<option value="still" disabled="">/);
+  });
+
+  it("turns Send into Queue or Steer with Stop while busy", () => {
+    const queue = renderToStaticMarkup(
+      <Composer {...composer} busy queued={1} locked />,
+    );
+
+    const steer = renderToStaticMarkup(
+      <Composer {...composer} busy locked whenBusy="steer" />,
+    );
+
+    expect(queue).toContain('aria-label="Stop answer"');
+    expect(queue).toContain('aria-label="Queue"');
+    expect(queue).toContain("1 queued");
+    expect(steer).toContain('aria-label="Steer"');
+    expect(steer).toMatch(/aria-checked="true"[^>]*>Steer/);
+  });
+
+  it("labels a saved unsent input as a retry", () => {
+    const html = renderToStaticMarkup(<Composer {...composer} pending />);
+
+    expect(html).toContain('aria-label="Retry send"');
+  });
+
+  it("sends on Enter only with a fine pointer; modifier Enter always sends", () => {
+    const key = {
+      key: "Enter",
+      shiftKey: false,
+      metaKey: false,
+      ctrlKey: false,
+    };
+
+    expect(sendsOnEnter(key, true)).toBe(true);
+    expect(sendsOnEnter(key, false)).toBe(false);
+    expect(sendsOnEnter({ ...key, shiftKey: true }, true)).toBe(false);
+    expect(sendsOnEnter({ ...key, metaKey: true }, false)).toBe(true);
+    expect(sendsOnEnter({ ...key, key: "a" }, true)).toBe(false);
+  });
+});
+
+describe("DecisionCard", () => {
+  it("names the exact URL and offers allow or deny", () => {
+    const html = renderToStaticMarkup(
+      <DecisionCard
+        url="https://www.rfc-editor.org/rfc/rfc2606"
+        onDecide={noop}
+      />,
+    );
+
+    expect(html).toContain(
+      "<code>https://www.rfc-editor.org/rfc/rfc2606</code>",
+    );
+    expect(html).toContain("Allow this URL");
+    expect(html).toContain("Deny");
+  });
+});

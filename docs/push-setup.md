@@ -1,6 +1,6 @@
 # Phase 2 push foundation
 
-The sidebar exposes enable/disable notifications and a per-conversation test event.
+Settings exposes enable/disable notifications and a test event for the open conversation.
 The real transport is disabled until operator VAPID configuration is supplied.
 Automatic agent-batch/release notifications belong to the upcoming agent/release phases.
 Push is a hint to fetch Pi's authoritative state, never a report store.

@@ -1,5 +1,6 @@
-import { useState, type ChangeEvent } from "react";
+import { useRef, useState, type ChangeEvent } from "react";
 import { Schema } from "effect";
+import { FileText, Paperclip } from "lucide-react";
 import {
   AttachmentUpload,
   type AttachmentMetadata,
@@ -58,48 +59,57 @@ export async function prepareAttachment(file: File): Promise<AttachmentUpload> {
   });
 }
 
+export function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
 export function AttachmentDisplay({
   attachments,
 }: {
   readonly attachments: readonly AttachmentMetadata[];
 }) {
   return (
-    <ul aria-label="Attachments">
+    <ul className="file-list" aria-label="Attachments">
       {attachments.map((attachment, index) => (
         <li key={`${attachment.sha256}-${index}`}>
-          <span>{attachment.name}</span>{" "}
-          <small>
-            {attachment.mimeType} · {attachment.bytes} bytes
-          </small>
+          <FileText size={16} aria-hidden="true" />
+          <span>{attachment.name}</span>
+          <small>{formatBytes(attachment.bytes)}</small>
         </li>
       ))}
     </ul>
   );
 }
 
+/** A real button opens a visually hidden input, so it stays in the tab order. */
 export function AttachmentChooser({
   onAdmission,
   onPreparing,
+  onError,
   disabled = false,
 }: {
   readonly onAdmission: (uploads: readonly AttachmentUpload[]) => Promise<void>;
   readonly onPreparing: (busy: boolean) => void;
+  readonly onError: (message: string) => void;
   readonly disabled?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const input = useRef<HTMLInputElement>(null);
 
   async function choose(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.currentTarget.files ?? []);
     event.currentTarget.value = "";
     setBusy(true);
     onPreparing(true);
-    setError(null);
 
     try {
       await onAdmission(await Promise.all(files.map(prepareAttachment)));
     } catch {
-      setError(
+      onError(
         "Could not admit attachments. Choose a supported image, PDF, or UTF-8 text file.",
       );
     } finally {
@@ -109,19 +119,28 @@ export function AttachmentChooser({
   }
 
   return (
-    <div>
-      <label>
-        Attach files
-        <input
-          type="file"
-          multiple
-          accept="image/png,image/jpeg,image/webp,application/pdf,text/plain"
-          disabled={disabled || busy}
-          onChange={choose}
-        />
-      </label>
-      {busy && <p role="status">Preparing attachments…</p>}
-      {error && <p role="alert">{error}</p>}
-    </div>
+    <>
+      <button
+        type="button"
+        className={`icon-button attach ${busy ? "is-busy" : ""}`}
+        aria-label={busy ? "Preparing attachments" : "Attach files"}
+        title="Attach image, PDF or text"
+        disabled={disabled || busy}
+        onClick={() => input.current?.click()}
+      >
+        <Paperclip size={20} aria-hidden="true" />
+      </button>
+      <input
+        ref={input}
+        className="visually-hidden"
+        type="file"
+        multiple
+        tabIndex={-1}
+        aria-hidden="true"
+        accept="image/png,image/jpeg,image/webp,application/pdf,text/plain"
+        disabled={disabled || busy}
+        onChange={choose}
+      />
+    </>
   );
 }

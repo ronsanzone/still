@@ -1,7 +1,21 @@
-import { useEffect, useRef, useState } from "react";
-import Markdown from "react-markdown";
-import { ArrowUp, Menu, Plus, Square, X } from "lucide-react";
-import { Effect, Match, Option, Result, Schema } from "effect";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import {
+  Activity,
+  ChevronLeft,
+  Globe,
+  MessageSquare,
+  Settings,
+  ShieldAlert,
+  SquarePen,
+  X,
+} from "lucide-react";
+import { Effect, Option, Result, Schema } from "effect";
 import {
   Bootstrap,
   ChatSnapshot,
@@ -9,17 +23,76 @@ import {
   Receipt,
   SendMessage,
   Work,
+  type Grant,
   type Message,
   type ModelChoice,
 } from "../shared/contracts.ts";
 import { apiPath, request, RequestFailure } from "./api.ts";
-import { AttachmentChooser, AttachmentDisplay } from "./attachments.tsx";
 import type { AttachmentUpload } from "../shared/attachments.ts";
-import { PushSubscription } from "../shared/push.ts";
+import { Composer } from "./composer.tsx";
+import { kits } from "./format.ts";
+import { Timeline } from "./timeline.tsx";
+import { ChatList, DecisionCard, SettingsView, WorkView } from "./views.tsx";
+
+type View = "chat" | "chats" | "work" | "settings";
 
 function stored(key: string) {
   return localStorage.getItem(`still:v1:${key}`) ?? "";
 }
+
+function initialView(): View {
+  const view = new URLSearchParams(location.search).get("view");
+
+  return view === "chats" || view === "work" || view === "settings"
+    ? view
+    : "chat";
+}
+
+function useWide() {
+  const query = "(min-width: 900px)";
+  const [wide, setWide] = useState(() => matchMedia(query).matches);
+
+  useEffect(() => {
+    const media = matchMedia(query);
+    const update = () => setWide(media.matches);
+    media.addEventListener("change", update);
+
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  return wide;
+}
+
+/** Sizes the shell to the visual viewport so the composer rides above the iOS keyboard. */
+function useVisualViewport(onResize: () => void) {
+  useEffect(() => {
+    const viewport = window.visualViewport;
+
+    if (!viewport) return;
+    const root = document.documentElement;
+
+    const update = () => {
+      root.style.setProperty("--app-height", `${viewport.height}px`);
+      root.style.setProperty("--app-top", `${viewport.offsetTop}px`);
+      root.classList.toggle(
+        "keyboard-open",
+        window.innerHeight - viewport.height > 120,
+      );
+      onResize();
+    };
+
+    update();
+    viewport.addEventListener("resize", update);
+    viewport.addEventListener("scroll", update);
+
+    return () => {
+      viewport.removeEventListener("resize", update);
+      viewport.removeEventListener("scroll", update);
+    };
+  }, [onResize]);
+}
+
+const kitIcons = { chat: MessageSquare, research: Globe, still: ShieldAlert };
 
 export function App() {
   const [models, setModels] = useState<readonly ModelChoice[]>([]);
@@ -32,23 +105,23 @@ export function App() {
     return Number.isSafeInteger(id) && id > 0 ? id : null;
   });
 
+  const [view, setView] = useState<View>(initialView);
   const [snapshot, setSnapshot] = useState<ChatSnapshot | null>(null);
   const [draft, setDraft] = useState(() => stored(`draft:${active ?? "new"}`));
   const [error, setError] = useState("");
   const [connected, setConnected] = useState(false);
   const [sending, setSending] = useState(false);
   const [preparing, setPreparing] = useState(false);
-  const [menu, setMenu] = useState(false);
-  const [tab, setTab] = useState<"chats" | "work">("chats");
   const [work, setWork] = useState<Schema.Schema.Type<typeof Work>>([]);
   const [whenBusy, setWhenBusy] = useState<"followUp" | "steer">("followUp");
   const [uploads, setUploads] = useState<readonly AttachmentUpload[]>([]);
   const [reuseEntry, setReuseEntry] = useState<number | undefined>(undefined);
-  const [pushStatus, setPushStatus] = useState("");
   const [newKit, setNewKit] = useState<"chat" | "research">("chat");
   const scroll = useRef<HTMLDivElement>(null);
   const inFlight = useRef(false);
   const stick = useRef(true);
+  const wide = useWide();
+  const page = wide && view === "chats" ? "chat" : view;
 
   function run<A>(
     effect: Effect.Effect<A, RequestFailure | Schema.SchemaError>,
@@ -63,6 +136,13 @@ export function App() {
       ),
     );
   }
+
+  const toBottom = useCallback(() => {
+    if (stick.current && scroll.current)
+      scroll.current.scrollTop = scroll.current.scrollHeight;
+  }, []);
+
+  useVisualViewport(toBottom);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -84,6 +164,13 @@ export function App() {
 
     return () => controller.abort();
   }, []);
+  useEffect(() => {
+    const url = new URL(location.href);
+
+    if (view === "chat") url.searchParams.delete("view");
+    else url.searchParams.set("view", view);
+    history.replaceState(null, "", url);
+  }, [view]);
   useEffect(() => {
     const url = new URL(location.href);
 
@@ -128,7 +215,7 @@ export function App() {
     return () => events.close();
   }, [active]);
   useEffect(() => {
-    if (tab !== "work") return;
+    if (view !== "work") return;
     const controller = new AbortController();
 
     const refresh = () => {
@@ -148,22 +235,18 @@ export function App() {
       clearInterval(timer);
       controller.abort();
     };
-  }, [tab]);
+  }, [view]);
   useEffect(() => {
     localStorage.setItem(`still:v1:draft:${active ?? "new"}`, draft);
   }, [draft, active]);
-  useEffect(() => {
-    if (stick.current && scroll.current)
-      scroll.current.scrollTop = scroll.current.scrollHeight;
-  }, [snapshot]);
+  useEffect(toBottom, [snapshot, page, toBottom]);
 
   function selectChat(id: number | null) {
     if (preparing) return;
     setActive(id);
     setDraft(stored(`draft:${id ?? "new"}`));
-    setMenu(false);
     setError("");
-    setTab("chats");
+    setView("chat");
     setUploads([]);
     setReuseEntry(undefined);
 
@@ -306,302 +389,134 @@ export function App() {
     }
   }
 
+  function changeKit(kit: Grant["kit"]) {
+    if (!active) {
+      if (kit === "chat" || kit === "research") setNewKit(kit);
+      else setError("Still requires supervisor authorization.");
+
+      return;
+    }
+
+    void run(
+      request(`/api/chats/${active}/kit`, Receipt, { kit, target: null }),
+      () => {},
+    );
+  }
+
   const busy = snapshot?.busy ?? false;
   const pending = active !== null && Boolean(stored(`pending:${active}`));
+  const locked = busy || Boolean(snapshot?.queued) || sending || preparing;
+  const kit = snapshot?.grant.kit ?? newKit;
+  const KitIcon = kitIcons[kit];
 
-  const messages = (snapshot?.messages ?? []).filter(
-    (item) =>
-      item.role !== "assistant" ||
-      item.text ||
-      item.thinking ||
-      item.failed ||
-      item.interrupted,
+  const empty =
+    !snapshot || (snapshot.messages.length === 0 && !snapshot.parent);
+
+  const status = busy
+    ? "Answering…"
+    : active && !connected
+      ? "Reconnecting…"
+      : null;
+
+  const nav: readonly {
+    readonly id: View;
+    readonly label: string;
+    readonly icon: ReactNode;
+  }[] = [
+    {
+      id: "chats",
+      label: "Chats",
+      icon: <MessageSquare size={20} aria-hidden="true" />,
+    },
+    {
+      id: "work",
+      label: "Work",
+      icon: <Activity size={20} aria-hidden="true" />,
+    },
+    {
+      id: "settings",
+      label: "Settings",
+      icon: <Settings size={20} aria-hidden="true" />,
+    },
+  ];
+
+  const navLinks = (className: string) => (
+    <nav className={className} aria-label="Primary">
+      {nav.map((item) => (
+        <a
+          key={item.id}
+          href={`?view=${item.id}`}
+          aria-current={
+            page === item.id || (item.id === "chats" && page === "chat")
+              ? "page"
+              : undefined
+          }
+          onClick={(event) => {
+            event.preventDefault();
+            setView(item.id);
+          }}
+        >
+          {item.icon}
+          <span>{item.label}</span>
+        </a>
+      ))}
+    </nav>
   );
 
-  const locked = busy || Boolean(snapshot?.queued) || sending || preparing;
-
-  const access = Match.value(snapshot?.grant.kit).pipe(
-    Match.when(
-      "still",
-      () => "Candidate tools share app permissions · not sandboxed",
-    ),
-    Match.when(
-      "research",
-      () => "Research · read-only public web · no workspace tools",
-    ),
-    Match.orElse(() => "Chat · no workspace access"),
+  const newChatButton = (
+    <button
+      type="button"
+      className="icon-button"
+      aria-label="New chat"
+      title="New chat"
+      disabled={sending || preparing}
+      onClick={() => selectChat(null)}
+    >
+      <SquarePen size={20} aria-hidden="true" />
+    </button>
   );
 
   return (
-    <div className="app-shell">
-      <aside
-        className={`sidebar ${menu ? "is-open" : ""}`}
-        aria-label="Conversations"
-      >
+    <div className={`app-shell view-${page}`}>
+      <aside className="sidebar" aria-label="Still">
         <div className="sidebar-top">
-          <span className="wordmark">
-            Still<span>.</span>
-          </span>
-          <button
-            className="icon-button mobile-only"
-            aria-label="Close conversations"
-            onClick={() => setMenu(false)}
-          >
-            <X size={20} />
-          </button>
+          <span className="wordmark">Still</span>
+          {newChatButton}
         </div>
-        <button
-          className="new-chat"
+        {navLinks("side-nav")}
+        <ChatList
+          chats={chats}
+          active={page === "chat" ? active : null}
           disabled={sending || preparing}
-          onClick={() => selectChat(null)}
-        >
-          <Plus size={18} /> New conversation
-        </button>
-        <div className="kit-tabs">
-          <button
-            aria-pressed={tab === "chats"}
-            onClick={() => setTab("chats")}
-          >
-            Chats
-          </button>
-          <button
-            aria-pressed={tab === "work"}
-            onClick={() => {
-              setTab("work");
-              setMenu(false);
-            }}
-          >
-            Work
-          </button>
-        </div>
-        <nav className="chat-list">
-          {chats.map((chat) => (
-            <button
-              key={chat.id}
-              className={active === chat.id ? "selected" : ""}
-              disabled={sending || preparing}
-              onClick={() => selectChat(chat.id)}
-            >
-              <span>
-                {chat.title}
-                <small>
-                  {chat.grant.kit} · {chat.model.split("/").at(-1)}
-                </small>
-              </span>
-            </button>
-          ))}
-        </nav>
-        <div className="sidebar-footer">
-          <button
-            onClick={async () => {
-              try {
-                const config = await Effect.runPromise(
-                  request(
-                    "/api/push",
-                    Schema.Struct({ publicKey: Schema.String }),
-                  ),
-                );
-
-                if (!config.publicKey) {
-                  setPushStatus("Push needs operator VAPID configuration.");
-
-                  return;
-                }
-
-                if (
-                  !("serviceWorker" in navigator) ||
-                  !("PushManager" in window)
-                ) {
-                  setPushStatus("This browser does not support Web Push.");
-
-                  return;
-                }
-
-                const registration =
-                  await navigator.serviceWorker.register("/sw.js");
-
-                await navigator.serviceWorker.ready;
-
-                const subscription = await registration.pushManager.subscribe({
-                  userVisibleOnly: true,
-                  applicationServerKey: config.publicKey,
-                });
-
-                const decoded = Schema.decodeUnknownSync(PushSubscription)(
-                  subscription.toJSON(),
-                );
-
-                await Effect.runPromise(
-                  request("/api/push/subscribe", Receipt, decoded),
-                );
-                setPushStatus("Subscribed. Test delivery from a conversation.");
-              } catch {
-                setPushStatus(
-                  "Notification subscription failed. Check permissions and operator setup.",
-                );
-              }
-            }}
-          >
-            Enable notifications
-          </button>
-          <button
-            onClick={async () => {
-              try {
-                const registration =
-                  await navigator.serviceWorker?.getRegistration();
-
-                const subscription =
-                  await registration?.pushManager.getSubscription();
-
-                if (subscription) {
-                  await Effect.runPromise(
-                    request("/api/push/unsubscribe", Receipt, {
-                      endpoint: subscription.endpoint,
-                    }),
-                  );
-                  await subscription.unsubscribe();
-                }
-
-                setPushStatus("Notifications disabled for this browser.");
-              } catch {
-                setPushStatus(
-                  "Could not revoke notifications. Try again before clearing browser storage.",
-                );
-              }
-            }}
-          >
-            Disable notifications
-          </button>
-          {active && (
-            <button
-              onClick={() =>
-                void run(
-                  request("/api/push/test", Receipt, {
-                    eventId: crypto.randomUUID(),
-                    conversationId: active,
-                  }),
-                  () =>
-                    setPushStatus(
-                      "Test event admitted; delivery status is not guaranteed.",
-                    ),
-                )
-              }
-            >
-              Test notification
-            </button>
-          )}
-          {pushStatus && <p role="status">{pushStatus}</p>}
-          <span>Pi Durable 1.0.2 · fresh-state v1</span>
-        </div>
-      </aside>
-      {menu && (
-        <button
-          className="scrim"
-          aria-label="Dismiss conversations"
-          onClick={() => setMenu(false)}
+          onSelect={selectChat}
         />
-      )}
+      </aside>
       <main className="main">
-        <header className="topbar">
-          <button
-            className="icon-button mobile-only"
-            aria-label="Open conversations"
-            onClick={() => setMenu(true)}
-          >
-            <Menu size={21} />
-          </button>
-          <div className="mode">
-            <strong>
-              {tab === "work"
-                ? "Work / live tasks"
-                : (snapshot?.title ?? "Still / New chat")}
-            </strong>
-            <span className="session-meta">
-              {busy
-                ? "Generating"
-                : active
-                  ? connected
-                    ? "Connected"
-                    : "Reconnecting"
-                  : "Ready"}{" "}
-              · ${snapshot?.cost.toFixed(5) ?? "0.00000"} reported
-            </span>
-          </div>
-          <button
-            className="icon-button"
-            aria-label="New conversation"
-            disabled={sending || preparing}
-            onClick={() => selectChat(null)}
-          >
-            <Plus size={21} />
-          </button>
-        </header>
-        {tab === "work" ? (
-          <section className="conversation">
-            <div className="transcript">
-              <h1>Work</h1>
-              <p>
-                Pi’s live task graph. Completed tasks leave this view; answers
-                stay in Chats.
-              </p>
-              {work.length === 0 && <p>No active tasks.</p>}
-              {work.map((task) => (
-                <button
-                  className="work-row"
-                  key={task.id}
-                  onClick={() => selectChat(task.conversationId)}
-                >
-                  <strong>{task.kind}</strong>
-                  <span>
-                    {task.status} · chat {task.conversationId}
-                    {task.background ? " · background" : ""}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </section>
-        ) : (
+        {page === "chat" ? (
           <>
-            <div className="kit-bar">
-              <label>
-                Kit{" "}
-                <select
-                  aria-label="Conversation kit"
-                  value={snapshot?.grant.kit ?? newKit}
-                  disabled={locked}
-                  onChange={(event) => {
-                    const kit = event.target.value;
-
-                    if (!active) {
-                      if (kit === "chat" || kit === "research") setNewKit(kit);
-                      else setError("Still requires supervisor authorization.");
-
-                      return;
-                    }
-
-                    if (kit === "chat" || kit === "research" || kit === "still")
-                      void run(
-                        request(`/api/chats/${active}/kit`, Receipt, {
-                          kit,
-                          target: null,
-                        }),
-                        () => {},
-                      );
-                  }}
-                >
-                  <option value="chat">Chat</option>
-                  <option value="research">Research · read-only web</option>
-                  <option value="still">Still · supervisor required</option>
-                </select>
-              </label>
-              {snapshot?.parent && (
-                <button onClick={() => selectChat(snapshot.parent ?? null)}>
-                  ← Parent chat
-                </button>
-              )}
-            </div>
+            <header className="topbar">
+              <button
+                type="button"
+                className="icon-button back"
+                aria-label="All chats"
+                onClick={() => setView("chats")}
+              >
+                <ChevronLeft size={22} aria-hidden="true" />
+              </button>
+              <div className="title">
+                <h1>{snapshot?.title ?? (active ? "Loading…" : "New chat")}</h1>
+                <p className={`subtitle kit-${kit}`} aria-live="polite">
+                  <KitIcon size={12} aria-hidden="true" />
+                  <span>
+                    {kits[kit].label} · {kits[kit].authority}
+                  </span>
+                  {status && <span className="status-dot">{status}</span>}
+                </p>
+              </div>
+              {newChatButton}
+            </header>
             <div
-              className="conversation"
+              className="scroller"
               ref={scroll}
               onScroll={() => {
                 const node = scroll.current;
@@ -612,327 +527,144 @@ export function App() {
                     100;
               }}
             >
-              {messages.length === 0 ? (
+              {empty ? (
                 <section className="welcome">
-                  <p className="eyebrow">CHAT / PI DURABLE</p>
-                  <h1>What are you working on?</h1>
-                  <p className="intro">
-                    A focused place to reason, research, and improve your tools.
+                  <h2>Ask anything.</h2>
+                  <p>
+                    Your machine, your keys. Work keeps going if you lock the
+                    phone.
                   </p>
-                  <div className="session-info">
-                    <div>
-                      <span>Chat</span>
-                      <strong>Reason without tools</strong>
-                    </div>
-                    <div>
-                      <span>Research</span>
-                      <strong>Search, read, cite</strong>
-                    </div>
-                    <div>
-                      <span>Still</span>
-                      <strong>Protected candidate work</strong>
-                    </div>
-                  </div>
-                </section>
-              ) : (
-                <section className="transcript" aria-label="Chat messages">
-                  {messages.map((item) => (
-                    <article key={item.id} className={`message ${item.role}`}>
-                      <div className="assistant-label">
-                        <span>
-                          {item.role === "user" ? "YOU" : "ASSISTANT"}
-                        </span>
-                        <span className="muted">
-                          {item.model?.split("/").at(-1)}
-                          {item.cost !== undefined
-                            ? ` · $${item.cost.toFixed(5)}`
-                            : ""}
-                        </span>
-                      </div>
-                      {item.thinking && (
-                        <details className="thinking">
-                          <summary>Thought process</summary>
-                          <p>{item.thinking}</p>
-                        </details>
-                      )}
-                      <div className="message-body">
-                        <Markdown>{item.text}</Markdown>
-                        {item.images?.map((image, index) => (
-                          <img
-                            className="attachment-image"
-                            key={index}
-                            src={`data:${image.mimeType};base64,${image.data}`}
-                            alt="Uploaded attachment"
-                          />
-                        ))}
-                        {item.attachmentText && (
-                          <details>
-                            <summary>Attached source text</summary>
-                            <pre>{item.attachmentText}</pre>
-                          </details>
-                        )}
-                      </div>
-                      {item.failed && (
-                        <p className="error-note">
-                          Response failed. Retry in a new branch.
-                        </p>
-                      )}
-                      {item.interrupted && <p>Interrupted</p>}
-                      {item.role === "user" && item.before && (
-                        <div className="turn-actions">
-                          <button
-                            disabled={locked}
-                            onClick={() => void forkPrompt(item, false)}
-                          >
-                            Edit & resend
-                          </button>
-                          <button
-                            disabled={locked}
-                            onClick={() => void forkPrompt(item, true)}
-                          >
-                            Retry in Chat branch
-                          </button>
-                        </div>
-                      )}
-                    </article>
-                  ))}
-                  {busy && <p role="status">Generating…</p>}
-                  {Boolean(snapshot?.tools.length) && (
-                    <details>
-                      <summary>Tool results · {snapshot?.tools.length}</summary>
-                      {snapshot?.tools.map((tool) => (
-                        <details key={tool.id}>
-                          <summary>
-                            {tool.name} · {tool.failed ? "failed" : "completed"}
-                          </summary>
-                          <pre>{tool.text}</pre>
-                        </details>
-                      ))}
-                    </details>
+                  <ul className="kit-guide">
+                    {(["chat", "research", "still"] as const).map((item) => {
+                      const Icon = kitIcons[item];
+
+                      return (
+                        <li key={item} className={`kit-${item}`}>
+                          <Icon size={16} aria-hidden="true" />
+                          <strong>{kits[item].label}</strong>
+                          <span>{kits[item].authority}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {!model && (
+                    <p className="hint">Choose a model below to start.</p>
                   )}
                 </section>
+              ) : (
+                <Timeline
+                  snapshot={snapshot}
+                  parentTitle={
+                    chats.find((chat) => chat.id === snapshot.parent)?.title ??
+                    null
+                  }
+                  locked={locked}
+                  onFork={(item, retry) => void forkPrompt(item, retry)}
+                  onOpenParent={() => selectChat(snapshot.parent ?? null)}
+                />
               )}
-              {Boolean(snapshot?.changes.length) && (
-                <details className="change-log">
-                  <summary>Kit & model history</summary>
-                  {snapshot?.changes.map((change) => (
-                    <p key={change.id}>{change.text}</p>
-                  ))}
-                </details>
-              )}
-              {Boolean(snapshot?.attachments.length) && (
-                <section className="source-panel">
-                  <AttachmentDisplay
-                    attachments={snapshot?.attachments ?? []}
-                  />
-                </section>
-              )}
-              {Boolean(snapshot?.citations.length) && (
-                <section className="source-panel" aria-label="Recorded sources">
-                  <h2>Sources</h2>
-                  <p>
-                    Recorded source metadata; not verification of the model’s
-                    claims.
-                  </p>
-                  {snapshot?.citations.map((source) => (
-                    <div key={`${source.number}-${source.url}`}>
-                      {source.url.startsWith("attachment:") ? (
-                        <span>
-                          [{source.number}] {source.title} · uploaded source
-                        </span>
-                      ) : (
-                        <a href={source.url} target="_blank" rel="noreferrer">
-                          [{source.number}] {source.title}
-                        </a>
-                      )}
-                      <small>
-                        {source.url} · {source.fetchedAt}
-                      </small>
-                      {source.url.startsWith("attachment:") &&
-                        snapshot.attachments.some(
-                          (file) =>
-                            file.sha256 === source.url.slice(11) &&
-                            file.mimeType === "application/pdf",
-                        ) && (
-                          <a
-                            href={apiPath(
-                              `/api/chats/${active}/attachments/${source.url.slice(11)}`,
-                            )}
-                          >
-                            Download original PDF
-                          </a>
-                        )}
-                    </div>
-                  ))}
-                </section>
-              )}
-              {snapshot?.confirmations.map((url) => (
-                <section className="source-panel confirmation" key={url}>
-                  <strong>Confirm an outbound URL</strong>
-                  <p>
-                    The model proposed this URL. Approval applies only to this
-                    exact URL, not its entire origin.
-                  </p>
-                  <code>{url}</code>
-                  <div>
-                    {[true, false].map((allow) => (
-                      <button
-                        key={String(allow)}
-                        onClick={() =>
-                          void run(
-                            request(`/api/chats/${active}/confirm`, Receipt, {
-                              url,
-                              allow,
-                              requestId: crypto.randomUUID(),
-                            }),
-                            () =>
-                              setDraft(
-                                allow
-                                  ? `Continue with the approved URL: ${url}`
-                                  : "Continue without that source.",
-                              ),
-                          )
-                        }
-                      >
-                        {allow ? "Allow URL" : "Deny"}
-                      </button>
-                    ))}
-                  </div>
-                  <small>
-                    Confirmation does not start another model turn; send
-                    Continue when ready.
-                  </small>
-                </section>
-              ))}
             </div>
-            <div className="composer-area">
+            <div className="dock">
+              {snapshot?.confirmations.map((url) => (
+                <DecisionCard
+                  key={url}
+                  url={url}
+                  onDecide={(allow) =>
+                    void run(
+                      request(`/api/chats/${active}/confirm`, Receipt, {
+                        url,
+                        allow,
+                        requestId: crypto.randomUUID(),
+                      }),
+                      () =>
+                        setDraft(
+                          allow
+                            ? `Continue with the approved URL: ${url}`
+                            : "Continue without that source.",
+                        ),
+                    )
+                  }
+                />
+              ))}
               {error && (
                 <div className="error-banner" role="alert">
-                  {error}
+                  <p>{error}</p>
                   <button
+                    type="button"
+                    className="icon-button"
                     aria-label="Dismiss error"
                     onClick={() => setError("")}
                   >
-                    <X size={15} />
+                    <X size={16} aria-hidden="true" />
                   </button>
                 </div>
               )}
-              {Boolean(snapshot?.queued) && (
-                <p>{snapshot?.queued} input queued</p>
-              )}
-              <form
-                className="composer"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void send();
-                }}
-              >
-                <AttachmentChooser
-                  disabled={locked || pending}
-                  onPreparing={setPreparing}
-                  onAdmission={async (files) =>
-                    setUploads((items) => [...items, ...files])
-                  }
-                />
-                {uploads.length > 0 && (
-                  <div className="pending-attachments">
-                    {uploads.map((file, index) => (
-                      <button
-                        type="button"
-                        key={index}
-                        onClick={() =>
-                          setUploads((items) =>
-                            items.filter((_, at) => at !== index),
-                          )
-                        }
-                      >
-                        {file.name} ×
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {reuseEntry && (
-                  <small>
-                    Original attachment content will be preserved in this
-                    branch.
-                  </small>
-                )}
-                <textarea
-                  aria-label="Message Still"
-                  placeholder={
-                    busy
-                      ? "Steer or queue a follow-up…"
-                      : "Ask a question or paste code…"
-                  }
-                  value={draft}
-                  readOnly={sending || pending}
-                  maxLength={16000}
-                  rows={3}
-                  onChange={(event) => setDraft(event.target.value)}
-                />
-                <div className="composer-bottom">
-                  <select
-                    aria-label="Choose model"
-                    value={model}
-                    disabled={locked || pending}
-                    onChange={(event) => setModel(event.target.value)}
-                  >
-                    <option value="">Choose a model</option>
-                    {models.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="send-actions">
-                    {busy && (
-                      <>
-                        <select
-                          aria-label="Input delivery"
-                          value={whenBusy}
-                          onChange={(event) =>
-                            setWhenBusy(
-                              event.target.value === "steer"
-                                ? "steer"
-                                : "followUp",
-                            )
-                          }
-                        >
-                          <option value="followUp">Queue</option>
-                          <option value="steer">Steer</option>
-                        </select>
-                        <button
-                          type="button"
-                          className="stop"
-                          aria-label="Stop response"
-                          onClick={() =>
-                            void run(
-                              request(`/api/chats/${active}/stop`, Receipt, {}),
-                              () => {},
-                            )
-                          }
-                        >
-                          <Square size={14} />
-                        </button>
-                      </>
-                    )}
-                    <button
-                      className="send"
-                      type="submit"
-                      aria-label={pending ? "Retry send" : "Send message"}
-                      disabled={!draft.trim() || !model || sending || preparing}
-                    >
-                      <ArrowUp size={20} />
-                    </button>
-                  </div>
-                </div>
-              </form>
-              <p className="privacy">
-                {access} · reported costs, not a billing guarantee
-              </p>
+              <Composer
+                draft={draft}
+                onDraft={setDraft}
+                models={models}
+                model={model}
+                onModel={setModel}
+                kit={kit}
+                onKit={changeKit}
+                canChooseStill={active !== null}
+                cost={snapshot?.cost ?? 0}
+                busy={busy}
+                queued={snapshot?.queued ?? 0}
+                whenBusy={whenBusy}
+                onWhenBusy={setWhenBusy}
+                uploads={uploads}
+                onUploads={setUploads}
+                onPreparing={setPreparing}
+                preparing={preparing}
+                locked={locked}
+                pending={pending}
+                sending={sending}
+                reusing={reuseEntry !== undefined}
+                onSend={() => void send()}
+                onStop={() =>
+                  void run(
+                    request(`/api/chats/${active}/stop`, Receipt, {}),
+                    () => {},
+                  )
+                }
+                onError={setError}
+              />
             </div>
           </>
+        ) : (
+          <div className="scroller page-scroller">
+            {page === "chats" && (
+              <section className="page" aria-labelledby="chats-title">
+                <h1 id="chats-title">Chats</h1>
+                <ChatList
+                  chats={chats}
+                  active={active}
+                  disabled={sending || preparing}
+                  onSelect={selectChat}
+                />
+              </section>
+            )}
+            {page === "work" && (
+              <WorkView work={work} chats={chats} onOpen={selectChat} />
+            )}
+            {page === "settings" && <SettingsView active={active} />}
+            {error && (
+              <div className="error-banner page-error" role="alert">
+                <p>{error}</p>
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="Dismiss error"
+                  onClick={() => setError("")}
+                >
+                  <X size={16} aria-hidden="true" />
+                </button>
+              </div>
+            )}
+          </div>
         )}
+        {page !== "chat" && navLinks("tabbar")}
       </main>
     </div>
   );
