@@ -586,14 +586,19 @@ details[open] > summary::after {
 }
 .branch-banner {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   padding: 8px 12px;
   border-radius: var(--r);
   background: var(--accent-soft);
   font-size: 14px;
 }
+.branch-banner svg {
+  margin-top: 4px;
+}
 .branch-banner button {
+  display: inline;
+  text-align: left;
   color: var(--accent);
   font-weight: 600;
   text-decoration: underline;

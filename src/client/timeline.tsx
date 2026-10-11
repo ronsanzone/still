@@ -11,7 +11,7 @@ import {
 import type { ChatSnapshot, Message } from "../shared/contracts.ts";
 import { apiPath } from "./api.ts";
 import { AttachmentDisplay } from "./attachments.tsx";
-import { shortModel } from "./format.ts";
+import { formatCost, shortModel } from "./format.ts";
 
 type Tool = ChatSnapshot["tools"][number];
 
@@ -56,7 +56,7 @@ export function timeline(snapshot: ChatSnapshot): readonly TimelineItem[] {
         tools: [tool],
       } as const,
     })),
-    ...snapshot.changes.map((change) => ({
+    ...effectiveChanges(snapshot.changes).map((change) => ({
       at: change.id,
       item: {
         kind: "change",
@@ -80,6 +80,24 @@ export function timeline(snapshot: ChatSnapshot): readonly TimelineItem[] {
   }
 
   return items;
+}
+
+/**
+ * Forks and new chats record a reset to Chat; showing it again when nothing
+ * changed is noise. Keeps only changes that differ from the value in force.
+ */
+function effectiveChanges(changes: ChatSnapshot["changes"]) {
+  const current = new Map([["Kit", "chat"]]);
+
+  return changes.filter((change) => {
+    const [field = "", ...rest] = change.text.split(": ");
+    const value = rest.join(": ");
+
+    if (current.get(field) === value) return false;
+    current.set(field, value);
+
+    return true;
+  });
 }
 
 export function describeChange(text: string) {
@@ -255,7 +273,7 @@ function AssistantTurn({
         <p className="meta">
           {item.interrupted && <span className="tag">Stopped</span>}
           {item.model && <span>{shortModel(item.model)}</span>}
-          {item.cost !== undefined && <span>${item.cost.toFixed(4)}</span>}
+          {item.cost !== undefined && <span>{formatCost(item.cost)}</span>}
         </p>
       )}
     </article>

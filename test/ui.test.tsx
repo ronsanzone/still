@@ -94,6 +94,24 @@ describe("timeline", () => {
     expect(items[2]?.kind === "work" && items[2].tools.length).toBe(3);
   });
 
+  it("drops kit resets that change nothing, as forks record", () => {
+    const items = timeline(
+      snapshot({
+        changes: [
+          { id: 1, text: "Kit: chat" },
+          { id: 2, text: "Kit: research" },
+          { id: 3, text: "Kit: research" },
+          { id: 4, text: "Kit: chat" },
+        ],
+      }),
+    );
+
+    expect(items.map((item) => item.kind === "change" && item.text)).toEqual([
+      "Switched to Research kit",
+      "Switched to Chat kit",
+    ]);
+  });
+
   it("keeps the live message last and hides tool-call-only assistant entries", () => {
     const live = message("live", "assistant", null, "Streaming");
     const items = timeline(snapshot({ messages: [live, ask, toolCall] }));
