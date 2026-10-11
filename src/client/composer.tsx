@@ -159,7 +159,6 @@ export function Composer(props: ComposerProps) {
           readOnly={props.sending || props.pending}
           maxLength={16000}
           rows={1}
-          enterKeyHint="send"
           onChange={(event) => props.onDraft(event.target.value)}
           onKeyDown={(event) => {
             if (
