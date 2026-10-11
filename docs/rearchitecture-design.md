@@ -1,5 +1,9 @@
 # Still: stable baseline and rearchitecture contract
 
+Historical design: superseded by the [finalized v1.2 specification](rearchitecture-and-product-spec.md).
+The archive provenance and verification results below remain valid; the Linux VM,
+migration compatibility, budgets and grant-revision proposals are not current requirements.
+
 Status: design handoff, not implemented. Prepared 2026-10-11 for an Opus-led rearchitecture.
 
 **The next change is a staged product/kernel migration, not a rewrite from memory.** Preserve the reviewed working prototype, its durable identities, and its release safety properties. This document does not authorize deployment, migration, deletion of legacy data, or beginning the rearchitecture.

@@ -5,10 +5,12 @@ Inspired by [Pi Pocket](https://github.com/TannerMidd/pi-pocket), not a fork.
 
 ## Rearchitecture handoff
 
-The [design and baseline provenance](docs/rearchitecture-design.md) distinguish
-this reviewed implementation from the proposed Chat/Research/Still kits and
-generic agents. The rearchitecture has not begun; the existing runtime and
-durable compatibility contracts remain unchanged.
+The authoritative [v1.2 specification](docs/rearchitecture-and-product-spec.md)
+defines the native Mac deployment, Chat/Research/Still kits, generic agents and
+fresh-state cutover. Implementation is incremental; target features are not
+current capabilities merely because the specification describes them.
+The earlier [baseline provenance and design](docs/rearchitecture-design.md)
+remains historical evidence, not the current implementation contract.
 
 ## Run
 
