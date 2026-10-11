@@ -3,6 +3,13 @@
 An original iPhone-first chat prototype built on Pi Durable 1.0.2 and Effect 4.0.0.
 Inspired by [Pi Pocket](https://github.com/TannerMidd/pi-pocket), not a fork.
 
+## Rearchitecture handoff
+
+The [design and baseline provenance](docs/rearchitecture-design.md) distinguish
+this reviewed implementation from the proposed Chat/Research/Still kits and
+generic agents. The rearchitecture has not begun; the existing runtime and
+durable compatibility contracts remain unchanged.
+
 ## Run
 
 Use Node 26.10.0, then `npm ci` and `npm run dev`. In an Amp orb, use
