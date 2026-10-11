@@ -36,6 +36,7 @@ import {
   sourceDiff,
   sourceFiles,
 } from "./files.ts";
+import { killAllOf, processStartTime } from "./platform.ts";
 
 export class BuilderFailure extends Schema.TaggedError<BuilderFailure>()(
   "BuilderFailure",
@@ -110,7 +111,7 @@ export async function openHost(settings: HostSettings) {
   if (owner !== 0 || group === undefined || owner === uid || uid === 0)
     throw new BuilderFailure({
       message:
-        "Linux supervisor must run as root and use a separate non-root app OS identity.",
+        "Supervisor must run as root and use a separate non-root app OS identity.",
       status: 503,
     });
   const ownerUid = owner;
@@ -121,9 +122,6 @@ export async function openHost(settings: HostSettings) {
     throw new Error("Host state root must be owned by supervisor");
   await chmod(root, 0o755);
   const lockPath = join(root, "supervisor.lock");
-
-  const startedAt = (stat: string) =>
-    stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] ?? "";
 
   const lockRecord = Schema.Struct({
     pid: Schema.Number,
@@ -137,11 +135,9 @@ export async function openHost(settings: HostSettings) {
       Schema.fromJsonString(lockRecord),
     )(existingLock);
 
-    const stat = await readFile(`/proc/${previousLock.pid}/stat`, "utf8").catch(
-      () => "",
-    );
+    const started = await processStartTime(previousLock.pid);
 
-    if (stat && startedAt(stat) === previousLock.started)
+    if (started && started === previousLock.started)
       throw new Error("Another supervisor already owns this host state");
     await rm(lockPath);
   }
@@ -152,7 +148,7 @@ export async function openHost(settings: HostSettings) {
     await lockFile.writeFile(
       JSON.stringify({
         pid: process.pid,
-        started: startedAt(await readFile(`/proc/${process.pid}/stat`, "utf8")),
+        started: await processStartTime(process.pid),
       }),
     );
     await lockFile.sync();
@@ -163,18 +159,7 @@ export async function openHost(settings: HostSettings) {
   // This UID must belong exclusively to this Still host. Pi bash groups detach from the app's group.
   // OS-account cleanup also catches orphan coding shells/checks after supervisor/app SIGKILL.
   async function stopIdentity() {
-    for (const pid of await readdir("/proc")) {
-      if (!/^\d+$/.test(pid)) continue;
-      const info = await lstat(`/proc/${pid}`).catch(() => undefined);
-
-      if (info?.uid !== uid) continue;
-
-      try {
-        process.kill(Number(pid), "SIGKILL");
-      } catch {
-        /* Process exited during cleanup. */
-      }
-    }
+    await killAllOf(uid);
   }
 
   await stopIdentity();
@@ -348,8 +333,7 @@ export async function openHost(settings: HostSettings) {
 
   async function remember(child: ChildProcess) {
     if (!child.pid) throw new Error("App did not start");
-    const stat = await readFile(`/proc/${child.pid}/stat`, "utf8");
-    const started = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
+    const started = await processStartTime(child.pid);
 
     if (!started) throw new Error("Cannot identify app process start time");
     journal.processes = [...journal.processes, { pid: child.pid, started }];
@@ -459,16 +443,11 @@ export async function openHost(settings: HostSettings) {
       existing,
     );
 
-    // Clean up orphan groups only after matching Linux PID start time, avoiding PID reuse.
+    // Clean up orphan groups only after matching the recorded process start time.
     for (const record of journal.processes) {
-      const stat = await readFile(`/proc/${record.pid}/stat`, "utf8").catch(
-        () => "",
-      );
+      const started = await processStartTime(record.pid);
 
-      if (
-        stat &&
-        stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] === record.started
-      ) {
+      if (started && started === record.started) {
         try {
           process.kill(-record.pid, "SIGKILL");
         } catch {
