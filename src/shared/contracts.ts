@@ -1,4 +1,6 @@
 import { Schema } from "effect";
+import { AttachmentUpload, AttachmentMetadata } from "./attachments.ts";
+import { Citation } from "./research.ts";
 
 export const ChatId = Schema.Int.check(Schema.isGreaterThan(0));
 
@@ -31,6 +33,8 @@ export const SendMessage = Schema.Struct({
   requestId: Schema.String.check(Schema.isPattern(/^[\w-]{8,80}$/)),
   model: Schema.optionalKey(Schema.NonEmptyString),
   whenBusy: Schema.optionalKey(Schema.Literals(["steer", "followUp"])),
+  attachments: Schema.optionalKey(Schema.Array(AttachmentUpload)),
+  reuseEntry: Schema.optionalKey(Schema.NullOr(ChatId)),
 });
 
 export interface SendMessage extends Schema.Schema.Type<typeof SendMessage> {}
@@ -53,6 +57,12 @@ export const Message = Schema.Struct({
   failed: Schema.Boolean,
   model: Schema.optionalKey(Schema.String),
   cost: Schema.optionalKey(Schema.Number),
+  images: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({ mimeType: Schema.String, data: Schema.String }),
+    ),
+  ),
+  attachmentText: Schema.optionalKey(Schema.String),
 });
 
 export interface Message extends Schema.Schema.Type<typeof Message> {}
@@ -71,6 +81,9 @@ export const ChatSnapshot = Schema.Struct({
   messages: Schema.Array(Message),
   busy: Schema.Boolean,
   queued: Schema.Number,
+  attachments: Schema.Array(AttachmentMetadata),
+  citations: Schema.Array(Citation),
+  confirmations: Schema.Array(Schema.String),
   cost: Schema.Number,
   parent: Schema.optionalKey(ChatId),
   changes: Schema.Array(Schema.Struct({ id: ChatId, text: Schema.String })),

@@ -294,6 +294,9 @@ describe("shared chat contracts", () => {
           cost: 0,
           tools: [],
           changes: [],
+          attachments: [],
+          citations: [],
+          confirmations: [],
         });
 
         expect(snapshot.id).toBe(1);

@@ -25,7 +25,11 @@ import {
   type EntryId,
   type Tx,
 } from "@earendil-works/pi-durable";
-import type { Message as PiMessage } from "@earendil-works/pi-ai";
+import type {
+  Message as PiMessage,
+  TextContent,
+  ImageContent,
+} from "@earendil-works/pi-ai";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import {
   ChatId,
@@ -39,6 +43,24 @@ import {
 } from "../shared/contracts.ts";
 import type { BuilderAdmission } from "../shared/builder.ts";
 import { ModelCatalog } from "./models.ts";
+import { ChatServices } from "./services.ts";
+import { Attachments, AttachmentEntry } from "../kernel/attachments.ts";
+import { SearchProvider } from "../kernel/search.ts";
+import {
+  FetchConfirm,
+  researchExtension,
+  researchDetails,
+  citations,
+} from "../kernel/research.ts";
+import { webUrl } from "../kernel/fetch.ts";
+import type { FetchDecision } from "../shared/research.ts";
+import {
+  Notifier,
+  notificationExtension,
+  subscribe,
+  unsubscribe,
+} from "../kernel/push.ts";
+import type { PushSubscription, PushEvent } from "../shared/push.ts";
 import { loadExtensions } from "../kernel/extensions.ts";
 import {
   ChatFailure,
@@ -99,6 +121,24 @@ function message(
     failed: value.role === "assistant" && value.stopReason === "error",
   };
 
+  if (value.role === "user" && Array.isArray(value.content)) {
+    return [
+      {
+        ...result,
+        text: value.content[0]?.type === "text" ? value.content[0].text : "",
+        images: value.content.flatMap((part) =>
+          part.type === "image"
+            ? [{ mimeType: part.mimeType, data: part.data }]
+            : [],
+        ),
+        attachmentText: value.content
+          .slice(1)
+          .flatMap((part) => (part.type === "text" ? [part.text] : []))
+          .join("\n\n"),
+      },
+    ];
+  }
+
   return value.role === "assistant"
     ? [
         {
@@ -146,12 +186,32 @@ export class Chats extends Context.Service<
       id: number,
     ) => Effect.Effect<string, ChatFailure | Schema.SchemaError>;
     readonly extensions: readonly string[];
+    readonly confirm: (
+      id: number,
+      input: FetchDecision,
+    ) => Effect.Effect<{ id: number }, ChatFailure | Schema.SchemaError>;
+    readonly pdf: (
+      id: number,
+      hash: string,
+    ) => Effect.Effect<Uint8Array, ChatFailure | Schema.SchemaError>;
+    readonly subscribe: (
+      input: PushSubscription,
+    ) => Effect.Effect<void, ChatFailure>;
+    readonly unsubscribe: (
+      endpoint: string,
+    ) => Effect.Effect<void, ChatFailure>;
+    readonly notify: (
+      input: PushEvent,
+    ) => Effect.Effect<{ id: number }, ChatFailure>;
   }
 >()("still/Chats") {
-  static readonly layer = Layer.effect(
+  static readonly core = Layer.effect(
     Chats,
     Effect.gen(function* () {
       const catalog = yield* ModelCatalog;
+      const attachments = yield* Attachments;
+      const research = researchExtension(yield* SearchProvider, attachments);
+      const push = notificationExtension(yield* Notifier);
 
       const path = yield* Config.String("STILL_DATABASE").pipe(
         Config.withDefault(".data/still-v1.sqlite"),
@@ -165,6 +225,8 @@ export class Chats extends Context.Service<
       yield* attempt(() => mkdir(dirname(path), { recursive: true }));
       const registry = createRegistry();
       registry.install(Kernel);
+      registry.install(research);
+      registry.install(push.extension);
 
       const extensions = yield* attempt(() =>
         loadExtensions(join(process.cwd(), "extensions"), registry),
@@ -329,7 +391,7 @@ export class Chats extends Context.Service<
             await idle(tx, handle.id);
             const grant = await tx.doc(GrantDoc, handle.id);
             const from = grant.kit;
-            await selectKit(tx, handle.id, valid, root);
+            await selectKit(tx, handle.id, valid, root, research);
             grant.kit = valid.kit;
             grant.target = valid.target;
             await tx.appendEntry(KitChange, handle.id, {
@@ -364,6 +426,8 @@ export class Chats extends Context.Service<
             const live = await tx.doc(LiveDoc, handle.id);
             const inbox = await tx.doc(InboxDoc, handle.id);
 
+            if (input.attachments?.length) await idle(tx, handle.id);
+
             if (input.model && input.model !== current) {
               const selected = modelRef(input.model);
               await idle(tx, handle.id);
@@ -379,6 +443,7 @@ export class Chats extends Context.Service<
                 handle.id,
                 await tx.doc(GrantDoc, handle.id),
                 root,
+                research,
               );
             const meta = await tx.doc(ChatDoc, handle.id);
 
@@ -391,13 +456,125 @@ export class Chats extends Context.Service<
 
         if (replay) return replay;
 
+        const admitted = yield* Effect.forEach(
+          input.attachments ?? [],
+          (upload) => attachments.admit(upload),
+        ).pipe(
+          Effect.mapError(
+            (error) => new ChatFailure({ message: error.message, status: 400 }),
+          ),
+        );
+
+        const content: (TextContent | ImageContent)[] = [
+          { type: "text", text: input.text },
+        ];
+
+        if (input.reuseEntry) {
+          const record = yield* attempt(() =>
+            harness.commit((tx) => tx.conversation(handle.id), context),
+          );
+
+          const parent = record?.parent;
+
+          if (!parent)
+            return yield* new ChatFailure({
+              message: "Attachment reuse requires a branch",
+              status: 400,
+            });
+          const source = yield* conversation(parent.conversationId);
+          const original = yield* attempt(() => source.context(context));
+
+          const at = original.entries.findIndex(
+            (entry) => entry.id === input.reuseEntry,
+          );
+
+          const message = original.entries[at]?.model?.find(
+            (item) => item.role === "user",
+          );
+
+          if (at < 1 || original.entries[at - 1]?.id !== parent.at || !message)
+            return yield* new ChatFailure({
+              message: "Attachment source is not the branch's next prompt",
+              status: 400,
+            });
+
+          if (Array.isArray(message.content))
+            content.push(...message.content.slice(1));
+        }
+
+        if (admitted.length) {
+          const view = yield* attempt(() => handle.context(context));
+
+          const previous = yield* attempt(() =>
+            handle.commit(async (tx) => {
+              const submission = await tx.submissionByRequest(
+                handle.id,
+                `attachments-${input.requestId}`,
+              );
+
+              if (!submission?.entry) return undefined;
+
+              return tx.entry(AttachmentEntry, submission.entry);
+            }, context),
+          );
+
+          if (
+            previous &&
+            JSON.stringify(previous.data.files) !==
+              JSON.stringify(admitted.map((item) => item.metadata))
+          )
+            return yield* new ChatFailure({
+              message: "Attachment request identity conflict",
+              status: 409,
+            });
+
+          const start = Math.max(
+            0,
+            ...citations(view.entries).map((item) => item.number),
+          );
+
+          const sources =
+            previous?.data.citations ??
+            admitted.map((item, index) => ({
+              number: start + index + 1,
+              url: `attachment:${item.metadata.sha256}`,
+              title: item.metadata.name,
+              fetchedAt: new Date().toISOString(),
+            }));
+
+          for (const [index, item] of admitted.entries())
+            content.push(
+              {
+                type: "text",
+                text: `Uploaded source [${sources[index]?.number}]`,
+              },
+              ...item.content,
+            );
+          yield* attempt(() =>
+            handle.submit(
+              {
+                type: "write",
+                requestId: `attachments-${input.requestId}`,
+                entry: {
+                  kind: AttachmentEntry.kind,
+                  data: {
+                    files: admitted.map((item) => ({ ...item.metadata })),
+                    citations: sources,
+                  },
+                },
+              },
+              context,
+            ),
+          );
+        }
+
         // Pi 1.0.2 has no public tx.submit. Serialize host calls across this boundary;
         // a crash before submit admits no input. Never nest submit inside commit.
         const submitted = yield* attempt(() =>
           handle.submit(
             {
               type: "input",
-              content: input.text,
+              content: content.length === 1 ? input.text : content,
               requestId: input.requestId,
               whenBusy: input.whenBusy ?? "followUp",
             },
@@ -547,6 +724,22 @@ export class Chats extends Context.Service<
               messages,
               busy: state.live.run !== undefined,
               queued: state.inbox.items.length,
+              attachments: view.entries.flatMap((entry) =>
+                AttachmentEntry.is(entry) ? entry.data.files : [],
+              ),
+              citations: citations(view.entries),
+              confirmations: [
+                ...new Set(
+                  researchDetails(view.entries).flatMap((item) =>
+                    item.confirmation ? [item.confirmation] : [],
+                  ),
+                ),
+              ].filter(
+                (url) =>
+                  !view.entries.some(
+                    (entry) => FetchConfirm.is(entry) && entry.data.url === url,
+                  ),
+              ),
               cost: [
                 ...Object.values(state.usage.models),
                 ...Object.values(state.usage.tools),
@@ -641,6 +834,60 @@ export class Chats extends Context.Service<
         });
       });
 
+      const confirm = Effect.fn("Chat.confirmFetch")(function* (
+        id: number,
+        input: FetchDecision,
+      ) {
+        const handle = yield* conversation(id);
+        const url = yield* attempt(async () => webUrl(input.url).href);
+
+        const result = yield* attempt(() =>
+          handle.submit(
+            {
+              type: "write",
+              requestId: input.requestId,
+              entry: {
+                kind: FetchConfirm.kind,
+                data: { url, allow: input.allow },
+              },
+            },
+            context,
+          ),
+        );
+
+        return { id: result.id };
+      });
+
+      const pdf = Effect.fn("Chat.pdf")(function* (id: number, hash: string) {
+        const handle = yield* conversation(id);
+        const view = yield* attempt(() => handle.context(context));
+
+        if (
+          !view.entries.some(
+            (entry) =>
+              AttachmentEntry.is(entry) &&
+              entry.data.files.some(
+                (item) =>
+                  item.sha256 === hash && item.mimeType === "application/pdf",
+              ),
+          )
+        )
+          return yield* new ChatFailure({
+            message: "Attachment not found in this conversation",
+            status: 404,
+          });
+
+        return yield* attachments.readPdf(hash).pipe(
+          Effect.mapError(
+            () =>
+              new ChatFailure({
+                message: "Attachment unavailable",
+                status: 404,
+              }),
+          ),
+        );
+      });
+
       return Chats.of({
         list,
         create,
@@ -654,7 +901,32 @@ export class Chats extends Context.Service<
         stop,
         watch,
         work,
+        confirm: (id, input) =>
+          confirm(id, input).pipe(admission.withPermits(1)),
+        pdf,
+        subscribe: (input) =>
+          attempt(() =>
+            harness.commit(
+              (tx) => Effect.runPromise(subscribe(tx, input, Date.now())),
+              context,
+            ),
+          ),
+        unsubscribe: (endpoint) =>
+          attempt(() =>
+            harness.commit(
+              (tx) => Effect.runPromise(unsubscribe(tx, endpoint)),
+              context,
+            ),
+          ),
+        notify: (input) =>
+          attempt(async () => ({
+            id: await harness.commit(
+              (tx) => Effect.runPromise(push.admit(tx, input)),
+              context,
+            ),
+          })),
       });
     }),
   );
+  static readonly layer = Chats.core.pipe(Layer.provide(ChatServices));
 }

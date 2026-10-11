@@ -2,9 +2,11 @@
 
 This directory currently provides a **read-only preflight**, not an installer.
 The authoritative target is [spec v1.2](../../docs/rearchitecture-and-product-spec.md),
-especially sections 13–17. Phase 1 implements kit grants and chat controls;
-generic agents, research tools, report delivery and passkey release approval
-remain pending. Do not expose the retained token-based release supervisor.
+especially sections 13–17. Phases 1–2 implement kit grants, chat controls,
+attachments, read-only research and push foundations; generic agents, report
+delivery and passkey release approval remain pending. See
+[push operator gates](../../docs/push-setup.md). Do not expose the retained
+token-based release supervisor.
 
 ## Safe commands now
 

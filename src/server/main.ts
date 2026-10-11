@@ -16,6 +16,8 @@ import {
   SendMessage,
 } from "../shared/contracts.ts";
 import { BuilderAdmission } from "../shared/builder.ts";
+import { FetchDecision } from "../shared/research.ts";
+import { PushSubscription, PushEvent } from "../shared/push.ts";
 
 const runtime = ManagedRuntime.make(
   Chats.layer.pipe(Layer.provideMerge(ModelCatalog.layer)),
@@ -51,6 +53,7 @@ function json<A>(response: ServerResponse, status: number, value: A) {
 const body = Effect.fn("Http.body")(function* (request: IncomingMessage) {
   if (
     !request.headers["content-type"]?.startsWith("application/json") ||
+    (request.headers["x-still-client"] !== "1" && !owner(request)) ||
     request.headers["sec-fetch-site"] === "cross-site"
   ) {
     return yield* new ChatFailure({
@@ -66,16 +69,13 @@ const body = Effect.fn("Http.body")(function* (request: IncomingMessage) {
 
       for await (const chunk of request) {
         text += chunk;
-
-        if (Buffer.byteLength(text) > 70000)
-          throw new Error("Request too large");
       }
 
       return text;
     },
     catch: () =>
       new ChatFailure({
-        message: "Request could not be read (maximum 70 KB).",
+        message: "Request could not be read.",
         status: 400,
       }),
   });
@@ -91,6 +91,72 @@ const route = Effect.fn("Http.route")(function* (
   pathname: string,
 ) {
   const chats = yield* Chats;
+
+  if (pathname === "/api/push" && request.method === "GET") {
+    const publicKey = yield* Config.String("STILL_VAPID_PUBLIC_KEY").pipe(
+      Config.withDefault(""),
+    );
+
+    json(response, 200, { publicKey });
+
+    return;
+  }
+
+  if (pathname === "/api/push/subscribe" && request.method === "POST") {
+    yield* chats.subscribe(
+      yield* Schema.decodeUnknownEffect(PushSubscription)(yield* body(request)),
+    );
+    json(response, 200, { id: 0 });
+
+    return;
+  }
+
+  if (pathname === "/api/push/unsubscribe" && request.method === "POST") {
+    const input = yield* Schema.decodeUnknownEffect(
+      Schema.Struct({ endpoint: Schema.String }),
+    )(yield* body(request));
+
+    yield* chats.unsubscribe(input.endpoint);
+    json(response, 200, { id: 0 });
+
+    return;
+  }
+
+  if (pathname === "/api/push/test" && request.method === "POST") {
+    json(
+      response,
+      202,
+      yield* chats.notify(
+        yield* Schema.decodeUnknownEffect(PushEvent)(yield* body(request)),
+      ),
+    );
+
+    return;
+  }
+
+  const download = /^\/api\/chats\/(\d+)\/attachments\/([a-f0-9]{64})$/.exec(
+    pathname,
+  );
+
+  if (download && request.method === "GET") {
+    const id = yield* Schema.decodeUnknownEffect(ChatId)(Number(download[1]));
+
+    if ((yield* chats.builderCandidate(id)) && !owner(request))
+      return yield* new ChatFailure({
+        message: "Supervisor authorization required",
+        status: 403,
+      });
+    const bytes = yield* chats.pdf(id, download[2] ?? "");
+    response.writeHead(200, {
+      "content-type": "application/pdf",
+      "content-disposition": 'attachment; filename="document.pdf"',
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+    });
+    response.end(bytes);
+
+    return;
+  }
 
   if (pathname === "/api/builder/chat" && request.method === "POST") {
     if (!owner(request))
@@ -141,9 +207,10 @@ const route = Effect.fn("Http.route")(function* (
     return;
   }
 
-  const parts = /^\/api\/chats\/(\d+)\/(events|messages|stop|kit|branch)$/.exec(
-    pathname,
-  );
+  const parts =
+    /^\/api\/chats\/(\d+)\/(events|messages|stop|kit|branch|confirm)$/.exec(
+      pathname,
+    );
 
   if (!parts)
     return yield* new ChatFailure({ message: "Not found.", status: 404 });
@@ -189,6 +256,19 @@ const route = Effect.fn("Http.route")(function* (
       status: 405,
     });
   const input = yield* body(request);
+
+  if (parts[2] === "confirm") {
+    json(
+      response,
+      202,
+      yield* chats.confirm(
+        id,
+        yield* Schema.decodeUnknownEffect(FetchDecision)(input),
+      ),
+    );
+
+    return;
+  }
 
   if (parts[2] === "kit") {
     json(

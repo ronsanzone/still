@@ -5,7 +5,8 @@ An original iPhone-first technical chat app on **Pi Durable 1.0.2** and
 
 The authoritative target is [spec v1.2](docs/rearchitecture-and-product-spec.md).
 The [baseline design/provenance](docs/rearchitecture-design.md) is historical.
-This checkout implements the **Phase 1 product-core cutover**, not the entire spec.
+This checkout implements **Phase 1 product core and Phase 2 attachments,
+Research and push foundations**, not the entire spec.
 
 ## Current product
 
@@ -13,8 +14,18 @@ This checkout implements the **Phase 1 product-core cutover**, not the entire sp
 - Explicit model choice on new chats and per turn. Changing models requires idle
   state; it never silently falls back to a different or paid model.
 - Chat / Research / Still kit labels backed by one `still.grant {kit,target}`
-  document. Chat and Research currently have **no tools**. Research search,
-  fetching, attachments and reports are next-phase work, not simulated features.
+  document. Chat has no tools; Research has read-only web search and fetch.
+  Research cannot combine its tools with Still filesystem/shell authority.
+- Image, PDF and UTF-8 text attachments. Images are normalized to at most 1600px;
+  PDF text is extracted and originals stored by SHA-256 outside source releases.
+  Sources and extracted content remain in Pi's native transcript across reconnect
+  and retry/edit branches. PDF download requires visible attachment provenance.
+- Numbered fetched/uploaded sources and exact-URL confirmation cards. Model-only
+  URLs grant no network authority. Source cards come from tool metadata, not
+  model-authored references; they do not prove the model's answer is accurate.
+- Optional Web Push subscription/revocation and manual test-event delivery using
+  native durable tasks/checkpoints. Automatic batch/release triggers are next-phase
+  work. See [operator setup and delivery limits](docs/push-setup.md).
 - Still selects Pi's read/write/edit/bash tools only for a supervisor-created
   candidate. The ordinary client cannot grant this authority. Selecting Still
   without that authority returns 403; the final approval UI is not implemented.
@@ -31,8 +42,8 @@ This checkout implements the **Phase 1 product-core cutover**, not the entire sp
 
 Arena, group synthesis/return, Builder sheets/commands and request-audit product
 routes have been removed. Generic-agent tools and reports will replace those
-product concepts; they are **not implemented in this milestone**. Voice, file
-attachments, web research, push, passkeys and native iOS are also not implemented.
+product concepts; they are **not implemented in this milestone**. Voice, passkeys,
+automatic report notifications and native iOS are also not implemented.
 
 ## Run and fresh state
 
@@ -57,6 +68,32 @@ tests require explicit selection of a currently verified free model.
 The app binds loopback and assumes a single authenticated owner at the proxy.
 It is not a public multi-user service. Never expose it without owner access
 control. Browser emulation does not replace real iPhone/Safari validation.
+
+## Research and attachment boundaries
+
+Supply `BRAVE_SEARCH_API_KEY` through the host's private environment mechanism,
+then restart. Obtain/enter the credential yourself; nothing provisions a Brave
+account. Without it search fails visibly, with no provider fallback. Fetching
+explicitly supplied public URLs needs no search credential. Live search pricing
+and quotas are operator decisions; verification uses local/fake adapters only.
+
+Each URL, including redirect destinations, must occur in native user input,
+successful search/fetch provenance, or an explicit owner confirmation. There is
+no wildcard origin grant. DNS answers are checked and the connection is pinned to
+the checked address while retaining Host/SNI and TLS verification. Private,
+reserved, metadata, tailnet and mapped addresses are denied; redirects recheck
+both provenance and DNS. DNS/connect and idle reads time out after 60 seconds.
+Readability extracts HTML; pdf.js extracts PDF text. External content and metadata
+are fenced as untrusted. Fencing is not a prompt-injection security boundary.
+
+There is no deliberate response-size/text truncation or attachment-count cap.
+Large inputs can exhaust process/browser storage or model context and fail;
+hostile-file resource containment is not implemented. Pending browser sends use
+localStorage and must fit its quota. Extracted PDF text omits scanned-image OCR.
+Uploads require an idle chat. Attachment metadata is a passive Pi entry followed
+by input admission: a crash between commits can leave metadata without a prompt;
+retrying the same ID reuses its source numbers. Originals may remain after failed
+admission and have no GC. Default storage is `attachments/` beside `STILL_DATABASE`.
 
 ## Authority and persistence
 
@@ -143,12 +180,18 @@ Oxlint rules, Effect integration tests using real disposable SQLite/faux, and
 the production client build. Kit tests cover busy/inbox transitions, denied
 authority, safe forks/raw children, model choice, queued/steered input and legacy
 DB refusal. Existing coding/recovery/source-gate and process/preflight tests stay.
+Phase 2 tests add real image/PDF decoding, concurrent original publication,
+attachment replay/branch/reopen and download scope, DNS pinning/rebinding,
+private/redirect/unknown-URL denial and hung/cancelled requests. Native Research
+tests check complete long-source output, numbered provenance, user-role summary
+spoof denial, cross-kit tool denial and reopen. Push tests cover disabled keys,
+endpoint validation, concurrent receipts, terminal failure, recovery and revocation.
 Removed Arena tests describe removed behavior, not current acceptance coverage.
 
 For the **disposable Linux orb only**, after checking the fixture UID is unused:
 
 ```sh
-sudo node --import tsx tools/builder-demo.ts --exercise /tmp/still-phase1-demo
+sudo node --import tsx tools/builder-demo.ts --exercise /tmp/still-phase2-demo
 ```
 
 Use a new root for each independent run. This real offline workflow exercises Pi

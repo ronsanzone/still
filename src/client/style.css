@@ -153,7 +153,8 @@ p {
 }
 .sidebar-footer {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: 9px;
   border-top: 1px solid var(--line);
   padding-top: 14px;
@@ -859,4 +860,61 @@ select {
   overflow-wrap: anywhere;
   max-height: 240px;
   overflow: auto;
+}
+
+.attachment-image {
+  display: block;
+  max-width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+  margin: 12px 0;
+}
+.source-panel {
+  max-width: 780px;
+  margin: 16px auto;
+  padding: 16px 18px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.source-panel h2 {
+  font: 14px var(--mono);
+}
+.source-panel small {
+  display: block;
+  color: var(--muted);
+  margin: 6px 0 14px;
+}
+.source-panel button,
+.sidebar-footer button {
+  min-height: 44px;
+  color: var(--accent);
+  padding: 8px;
+}
+.confirmation {
+  background: var(--surface);
+}
+.composer input[type="file"] {
+  display: block;
+  max-width: 100%;
+  font-size: 12px;
+  margin: 8px 0;
+}
+.composer label {
+  font: 11px var(--mono);
+}
+.pending-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.pending-attachments button {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  padding: 8px;
+  background: var(--surface);
+}
+.sidebar-footer p {
+  font-size: 11px;
 }

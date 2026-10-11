@@ -735,6 +735,10 @@ export class Releases extends Context.Service<
         "OPENCODE_GO_API_KEY",
         "OPENAI_API_KEY",
         "ANTHROPIC_API_KEY",
+        "BRAVE_SEARCH_API_KEY",
+        "STILL_VAPID_PUBLIC_KEY",
+        "STILL_VAPID_PRIVATE_KEY",
+        "STILL_VAPID_SUBJECT",
         "STILL_FAUX_DEMO",
       ]) {
         const value = yield* Config.String(key).pipe(Config.withDefault(""));

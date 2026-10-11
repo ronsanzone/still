@@ -13,6 +13,9 @@ import {
   type ModelChoice,
 } from "../shared/contracts.ts";
 import { apiPath, request, RequestFailure } from "./api.ts";
+import { AttachmentChooser, AttachmentDisplay } from "./attachments.tsx";
+import type { AttachmentUpload } from "../shared/attachments.ts";
+import { PushSubscription } from "../shared/push.ts";
 
 function stored(key: string) {
   return localStorage.getItem(`still:v1:${key}`) ?? "";
@@ -34,10 +37,15 @@ export function App() {
   const [error, setError] = useState("");
   const [connected, setConnected] = useState(false);
   const [sending, setSending] = useState(false);
+  const [preparing, setPreparing] = useState(false);
   const [menu, setMenu] = useState(false);
   const [tab, setTab] = useState<"chats" | "work">("chats");
   const [work, setWork] = useState<Schema.Schema.Type<typeof Work>>([]);
   const [whenBusy, setWhenBusy] = useState<"followUp" | "steer">("followUp");
+  const [uploads, setUploads] = useState<readonly AttachmentUpload[]>([]);
+  const [reuseEntry, setReuseEntry] = useState<number | undefined>(undefined);
+  const [pushStatus, setPushStatus] = useState("");
+  const [newKit, setNewKit] = useState<"chat" | "research">("chat");
   const scroll = useRef<HTMLDivElement>(null);
   const inFlight = useRef(false);
   const stick = useRef(true);
@@ -150,17 +158,23 @@ export function App() {
   }, [snapshot]);
 
   function selectChat(id: number | null) {
+    if (preparing) return;
     setActive(id);
     setDraft(stored(`draft:${id ?? "new"}`));
     setMenu(false);
     setError("");
     setTab("chats");
+    setUploads([]);
+    setReuseEntry(undefined);
 
-    if (id === null) setModel("");
+    if (id === null) {
+      setModel("");
+      setNewKit("chat");
+    }
   }
 
   async function send() {
-    if (inFlight.current || !draft.trim() || !model) return;
+    if (inFlight.current || preparing || !draft.trim() || !model) return;
     inFlight.current = true;
     setSending(true);
     setError("");
@@ -183,6 +197,14 @@ export function App() {
         setActive(id);
         setChats((items) => [created.success, ...items]);
         localStorage.removeItem("still:v1:draft:new");
+
+        if (newKit === "research")
+          await Effect.runPromise(
+            request(`/api/chats/${id}/kit`, Receipt, {
+              kit: "research",
+              target: null,
+            }),
+          );
       }
 
       const saved = Schema.decodeUnknownOption(
@@ -195,6 +217,8 @@ export function App() {
             text: draft.trim(),
             model,
             whenBusy,
+            attachments: uploads,
+            reuseEntry: reuseEntry ?? null,
             requestId: crypto.randomUUID(),
           };
 
@@ -209,6 +233,8 @@ export function App() {
       if (Result.isSuccess(result)) {
         localStorage.removeItem(`still:v1:pending:${id}`);
         setDraft("");
+        setUploads([]);
+        setReuseEntry(undefined);
         stick.current = true;
       } else {
         setError(result.failure.message);
@@ -220,6 +246,10 @@ export function App() {
         )
           localStorage.removeItem(`still:v1:pending:${id}`);
       }
+    } catch {
+      setError(
+        "Could not safely save or send this input. Keep your files and retry; no paid fallback is used.",
+      );
     } finally {
       inFlight.current = false;
       setSending(false);
@@ -247,11 +277,13 @@ export function App() {
 
       selectChat(fork.success.id);
       setDraft(item.text);
+      setReuseEntry(item.entry ?? undefined);
 
       if (retry) {
         const input = {
           text: item.text,
           model,
+          reuseEntry: item.entry,
           requestId: crypto.randomUUID(),
         };
 
@@ -264,6 +296,7 @@ export function App() {
           () => {
             localStorage.removeItem(`still:v1:pending:${fork.success.id}`);
             setDraft("");
+            setReuseEntry(undefined);
           },
         );
       }
@@ -275,15 +308,27 @@ export function App() {
 
   const busy = snapshot?.busy ?? false;
   const pending = active !== null && Boolean(stored(`pending:${active}`));
-  const messages = snapshot?.messages ?? [];
-  const locked = busy || Boolean(snapshot?.queued) || sending;
+
+  const messages = (snapshot?.messages ?? []).filter(
+    (item) =>
+      item.role !== "assistant" ||
+      item.text ||
+      item.thinking ||
+      item.failed ||
+      item.interrupted,
+  );
+
+  const locked = busy || Boolean(snapshot?.queued) || sending || preparing;
 
   const access = Match.value(snapshot?.grant.kit).pipe(
     Match.when(
       "still",
       () => "Candidate tools share app permissions · not sandboxed",
     ),
-    Match.when("research", () => "Research kit · web tools not installed yet"),
+    Match.when(
+      "research",
+      () => "Research · read-only public web · no workspace tools",
+    ),
     Match.orElse(() => "Chat · no workspace access"),
   );
 
@@ -307,7 +352,7 @@ export function App() {
         </div>
         <button
           className="new-chat"
-          disabled={sending}
+          disabled={sending || preparing}
           onClick={() => selectChat(null)}
         >
           <Plus size={18} /> New conversation
@@ -334,7 +379,7 @@ export function App() {
             <button
               key={chat.id}
               className={active === chat.id ? "selected" : ""}
-              disabled={sending}
+              disabled={sending || preparing}
               onClick={() => selectChat(chat.id)}
             >
               <span>
@@ -346,7 +391,108 @@ export function App() {
             </button>
           ))}
         </nav>
-        <div className="sidebar-footer">Pi Durable 1.0.2 · fresh-state v1</div>
+        <div className="sidebar-footer">
+          <button
+            onClick={async () => {
+              try {
+                const config = await Effect.runPromise(
+                  request(
+                    "/api/push",
+                    Schema.Struct({ publicKey: Schema.String }),
+                  ),
+                );
+
+                if (!config.publicKey) {
+                  setPushStatus("Push needs operator VAPID configuration.");
+
+                  return;
+                }
+
+                if (
+                  !("serviceWorker" in navigator) ||
+                  !("PushManager" in window)
+                ) {
+                  setPushStatus("This browser does not support Web Push.");
+
+                  return;
+                }
+
+                const registration =
+                  await navigator.serviceWorker.register("/sw.js");
+
+                await navigator.serviceWorker.ready;
+
+                const subscription = await registration.pushManager.subscribe({
+                  userVisibleOnly: true,
+                  applicationServerKey: config.publicKey,
+                });
+
+                const decoded = Schema.decodeUnknownSync(PushSubscription)(
+                  subscription.toJSON(),
+                );
+
+                await Effect.runPromise(
+                  request("/api/push/subscribe", Receipt, decoded),
+                );
+                setPushStatus("Subscribed. Test delivery from a conversation.");
+              } catch {
+                setPushStatus(
+                  "Notification subscription failed. Check permissions and operator setup.",
+                );
+              }
+            }}
+          >
+            Enable notifications
+          </button>
+          <button
+            onClick={async () => {
+              try {
+                const registration =
+                  await navigator.serviceWorker?.getRegistration();
+
+                const subscription =
+                  await registration?.pushManager.getSubscription();
+
+                if (subscription) {
+                  await Effect.runPromise(
+                    request("/api/push/unsubscribe", Receipt, {
+                      endpoint: subscription.endpoint,
+                    }),
+                  );
+                  await subscription.unsubscribe();
+                }
+
+                setPushStatus("Notifications disabled for this browser.");
+              } catch {
+                setPushStatus(
+                  "Could not revoke notifications. Try again before clearing browser storage.",
+                );
+              }
+            }}
+          >
+            Disable notifications
+          </button>
+          {active && (
+            <button
+              onClick={() =>
+                void run(
+                  request("/api/push/test", Receipt, {
+                    eventId: crypto.randomUUID(),
+                    conversationId: active,
+                  }),
+                  () =>
+                    setPushStatus(
+                      "Test event admitted; delivery status is not guaranteed.",
+                    ),
+                )
+              }
+            >
+              Test notification
+            </button>
+          )}
+          {pushStatus && <p role="status">{pushStatus}</p>}
+          <span>Pi Durable 1.0.2 · fresh-state v1</span>
+        </div>
       </aside>
       {menu && (
         <button
@@ -384,7 +530,7 @@ export function App() {
           <button
             className="icon-button"
             aria-label="New conversation"
-            disabled={sending}
+            disabled={sending || preparing}
             onClick={() => selectChat(null)}
           >
             <Plus size={21} />
@@ -421,10 +567,17 @@ export function App() {
                 Kit{" "}
                 <select
                   aria-label="Conversation kit"
-                  value={snapshot?.grant.kit ?? "chat"}
-                  disabled={!active || locked}
+                  value={snapshot?.grant.kit ?? newKit}
+                  disabled={locked}
                   onChange={(event) => {
                     const kit = event.target.value;
+
+                    if (!active) {
+                      if (kit === "chat" || kit === "research") setNewKit(kit);
+                      else setError("Still requires supervisor authorization.");
+
+                      return;
+                    }
 
                     if (kit === "chat" || kit === "research" || kit === "still")
                       void run(
@@ -437,7 +590,7 @@ export function App() {
                   }}
                 >
                   <option value="chat">Chat</option>
-                  <option value="research">Research · tools pending</option>
+                  <option value="research">Research · read-only web</option>
                   <option value="still">Still · supervisor required</option>
                 </select>
               </label>
@@ -473,7 +626,7 @@ export function App() {
                     </div>
                     <div>
                       <span>Research</span>
-                      <strong>Web tools coming next</strong>
+                      <strong>Search, read, cite</strong>
                     </div>
                     <div>
                       <span>Still</span>
@@ -504,6 +657,20 @@ export function App() {
                       )}
                       <div className="message-body">
                         <Markdown>{item.text}</Markdown>
+                        {item.images?.map((image, index) => (
+                          <img
+                            className="attachment-image"
+                            key={index}
+                            src={`data:${image.mimeType};base64,${image.data}`}
+                            alt="Uploaded attachment"
+                          />
+                        ))}
+                        {item.attachmentText && (
+                          <details>
+                            <summary>Attached source text</summary>
+                            <pre>{item.attachmentText}</pre>
+                          </details>
+                        )}
                       </div>
                       {item.failed && (
                         <p className="error-note">
@@ -553,6 +720,90 @@ export function App() {
                   ))}
                 </details>
               )}
+              {Boolean(snapshot?.attachments.length) && (
+                <section className="source-panel">
+                  <AttachmentDisplay
+                    attachments={snapshot?.attachments ?? []}
+                  />
+                </section>
+              )}
+              {Boolean(snapshot?.citations.length) && (
+                <section className="source-panel" aria-label="Recorded sources">
+                  <h2>Sources</h2>
+                  <p>
+                    Recorded source metadata; not verification of the model’s
+                    claims.
+                  </p>
+                  {snapshot?.citations.map((source) => (
+                    <div key={`${source.number}-${source.url}`}>
+                      {source.url.startsWith("attachment:") ? (
+                        <span>
+                          [{source.number}] {source.title} · uploaded source
+                        </span>
+                      ) : (
+                        <a href={source.url} target="_blank" rel="noreferrer">
+                          [{source.number}] {source.title}
+                        </a>
+                      )}
+                      <small>
+                        {source.url} · {source.fetchedAt}
+                      </small>
+                      {source.url.startsWith("attachment:") &&
+                        snapshot.attachments.some(
+                          (file) =>
+                            file.sha256 === source.url.slice(11) &&
+                            file.mimeType === "application/pdf",
+                        ) && (
+                          <a
+                            href={apiPath(
+                              `/api/chats/${active}/attachments/${source.url.slice(11)}`,
+                            )}
+                          >
+                            Download original PDF
+                          </a>
+                        )}
+                    </div>
+                  ))}
+                </section>
+              )}
+              {snapshot?.confirmations.map((url) => (
+                <section className="source-panel confirmation" key={url}>
+                  <strong>Confirm an outbound URL</strong>
+                  <p>
+                    The model proposed this URL. Approval applies only to this
+                    exact URL, not its entire origin.
+                  </p>
+                  <code>{url}</code>
+                  <div>
+                    {[true, false].map((allow) => (
+                      <button
+                        key={String(allow)}
+                        onClick={() =>
+                          void run(
+                            request(`/api/chats/${active}/confirm`, Receipt, {
+                              url,
+                              allow,
+                              requestId: crypto.randomUUID(),
+                            }),
+                            () =>
+                              setDraft(
+                                allow
+                                  ? `Continue with the approved URL: ${url}`
+                                  : "Continue without that source.",
+                              ),
+                          )
+                        }
+                      >
+                        {allow ? "Allow URL" : "Deny"}
+                      </button>
+                    ))}
+                  </div>
+                  <small>
+                    Confirmation does not start another model turn; send
+                    Continue when ready.
+                  </small>
+                </section>
+              ))}
             </div>
             <div className="composer-area">
               {error && (
@@ -576,6 +827,36 @@ export function App() {
                   void send();
                 }}
               >
+                <AttachmentChooser
+                  disabled={locked || pending}
+                  onPreparing={setPreparing}
+                  onAdmission={async (files) =>
+                    setUploads((items) => [...items, ...files])
+                  }
+                />
+                {uploads.length > 0 && (
+                  <div className="pending-attachments">
+                    {uploads.map((file, index) => (
+                      <button
+                        type="button"
+                        key={index}
+                        onClick={() =>
+                          setUploads((items) =>
+                            items.filter((_, at) => at !== index),
+                          )
+                        }
+                      >
+                        {file.name} ×
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {reuseEntry && (
+                  <small>
+                    Original attachment content will be preserved in this
+                    branch.
+                  </small>
+                )}
                 <textarea
                   aria-label="Message Still"
                   placeholder={
@@ -639,7 +920,7 @@ export function App() {
                       className="send"
                       type="submit"
                       aria-label={pending ? "Retry send" : "Send message"}
-                      disabled={!draft.trim() || !model || sending}
+                      disabled={!draft.trim() || !model || sending || preparing}
                     >
                       <ArrowUp size={20} />
                     </button>

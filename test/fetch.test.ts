@@ -1,0 +1,212 @@
+import { createServer, request, type RequestOptions } from "node:http";
+import { expect, it } from "vitest";
+import { Predicate } from "effect";
+import {
+  network,
+  publicAddress,
+  readUrl,
+  webUrl,
+  ConfirmationRequired,
+} from "../src/kernel/fetch.ts";
+
+it("rejects private, metadata, tailnet, reserved and mapped addresses including alternate encodings", async () => {
+  for (const host of [
+    "127.0.0.1",
+    "127.1",
+    "2130706433",
+    "0x7f000001",
+    "0.1.2.3",
+    "10.2.3.4",
+    "172.31.1.1",
+    "192.168.1.1",
+    "169.254.169.254",
+    "100.100.100.100",
+    "[::1]",
+    "[::ffff:127.0.0.1]",
+    "[fc00::1]",
+    "[fe80::1]",
+    "[2002:7f00:1::]",
+    "224.1.1.1",
+    "255.255.255.255",
+  ])
+    expect(() => webUrl(`http://${host}/`)).toThrow();
+
+  for (const url of [
+    "file:///etc/passwd",
+    "ftp://example.com",
+    "http://user:pass@example.com",
+  ])
+    expect(() => webUrl(url)).toThrow();
+  expect(publicAddress("8.8.8.8")).toBe(true);
+  expect(publicAddress("2606:4700:4700::1111")).toBe(true);
+  expect(network.idleMs).toBe(60000);
+  await expect(
+    readUrl("http://private.test", () => true, undefined, {
+      ...network,
+      resolve: async () => [{ address: "10.0.0.1", family: 4 }],
+    }),
+  ).rejects.toThrow("DNS answer blocked");
+  await expect(
+    readUrl("http://mixed.test", () => true, undefined, {
+      ...network,
+      resolve: async () => [
+        { address: "8.8.8.8", family: 4 },
+        { address: "::1", family: 6 },
+      ],
+    }),
+  ).rejects.toThrow("DNS answer blocked");
+  await expect(
+    readUrl("http://hung-dns.test", () => true, undefined, {
+      ...network,
+      idleMs: 20,
+      resolve: () => new Promise(() => {}),
+    }),
+  ).rejects.toThrow("timed out");
+  const cancelled = new AbortController();
+  cancelled.abort();
+  await expect(
+    readUrl("http://cancelled.test", () => true, cancelled.signal, {
+      ...network,
+      resolve: () => new Promise(() => {}),
+    }),
+  ).rejects.toThrow("cancelled");
+});
+
+it("pins checked DNS, rechecks redirects, refuses unknown URLs and closes hung connections", async () => {
+  const seen: string[] = [];
+
+  const server = createServer((req, res) => {
+    seen.push(req.url ?? "");
+
+    if (req.url === "/private") {
+      res.writeHead(302, { location: "http://169.254.169.254/secret" });
+      res.end();
+    } else if (req.url === "/cross") {
+      res.writeHead(302, { location: "http://other.test/answer" });
+      res.end();
+    } else if (req.url === "/redirect") {
+      res.writeHead(302, { location: "/answer" });
+      res.end();
+    } else if (req.url === "/loop") {
+      res.writeHead(302, { location: "/loop" });
+      res.end();
+    } else if (req.url === "/hung") {
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.write("started");
+    } else if (req.url !== "/no-headers") {
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end("complete public answer");
+    }
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+
+  if (!address || Predicate.isString(address))
+    throw new Error("Missing test port");
+  let resolutions = 0;
+  const pins: string[] = [];
+
+  const transport = {
+    idleMs: 60,
+    resolve: async () => {
+      resolutions += 1;
+
+      return [{ address: "93.184.216.34", family: 4 }];
+    },
+    request: (url: URL, options: RequestOptions) => {
+      const local = new URL(url);
+      local.port = String(address.port);
+
+      return request(local, {
+        ...options,
+        lookup: (host, opts, callback) => {
+          // Test-only dial mapping. Production's checked lookup is exercised, then mapped to the fixture socket.
+          if (!options.lookup) throw new Error("Unpinned request");
+          options.lookup(host, { ...opts, all: false }, (error, checked) => {
+            if (error || !Predicate.isString(checked))
+              throw new Error("Missing pinned IP");
+            pins.push(checked);
+
+            if (opts.all) callback(null, [{ address: "127.0.0.1", family: 4 }]);
+            else callback(null, "127.0.0.1", 4);
+          });
+        },
+      });
+    },
+  };
+
+  try {
+    const result = await readUrl(
+      "http://public.test/answer",
+      () => true,
+      undefined,
+      transport,
+    );
+
+    expect(result.bytes.toString()).toBe("complete public answer");
+    expect(resolutions).toBe(1);
+    expect(pins).toEqual(["93.184.216.34"]);
+    const before = seen.length;
+    await expect(
+      readUrl(
+        "http://public.test/composed?secret=abc",
+        () => false,
+        undefined,
+        transport,
+      ),
+    ).rejects.toBeInstanceOf(ConfirmationRequired);
+    expect(seen.length).toBe(before);
+    await expect(
+      readUrl("http://public.test/private", () => true, undefined, transport),
+    ).rejects.toThrow("address blocked");
+    expect(seen).not.toContain("/secret");
+    await expect(
+      readUrl(
+        "http://public.test/cross",
+        (url) => url === "http://public.test/cross",
+        undefined,
+        transport,
+      ),
+    ).rejects.toMatchObject({ url: "http://other.test/answer" });
+
+    const redirect = await readUrl(
+      "http://public.test/redirect",
+      () => true,
+      undefined,
+      transport,
+    );
+
+    expect(redirect.url).toBe("http://public.test/answer");
+    await expect(
+      readUrl("http://public.test/loop", () => true, undefined, transport),
+    ).rejects.toThrow("loop");
+    await expect(
+      readUrl("http://public.test/hung", () => true, undefined, transport),
+    ).rejects.toThrow();
+    await expect(
+      readUrl(
+        "http://public.test/no-headers",
+        () => true,
+        undefined,
+        transport,
+      ),
+    ).rejects.toThrow();
+    let rebinding = 0;
+    await expect(
+      readUrl("http://public.test/redirect", () => true, undefined, {
+        ...transport,
+        resolve: async () => [
+          {
+            address: ++rebinding === 1 ? "93.184.216.34" : "127.0.0.1",
+            family: 4,
+          },
+        ],
+      }),
+    ).rejects.toThrow("DNS answer blocked");
+    expect(rebinding).toBe(2);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});

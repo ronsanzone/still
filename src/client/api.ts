@@ -1,4 +1,6 @@
 import { Effect, Schema } from "effect";
+import type { FetchDecision } from "../shared/research.ts";
+import type { PushSubscription, PushEvent } from "../shared/push.ts";
 import {
   ApiProblem,
   type Grant,
@@ -27,6 +29,10 @@ export const request = Effect.fn("Api.request")(function* <A>(
     | SendMessage
     | Grant
     | Branch
+    | FetchDecision
+    | PushSubscription
+    | PushEvent
+    | { readonly endpoint: string }
     | { readonly model: string }
     | Record<string, never>,
 ) {
@@ -39,6 +45,7 @@ export const request = Effect.fn("Api.request")(function* <A>(
               method: "POST",
               headers: {
                 "content-type": "application/json",
+                "x-still-client": "1",
               },
               body: JSON.stringify(payload),
               signal,
