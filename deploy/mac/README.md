@@ -2,9 +2,9 @@
 
 This directory currently provides a **read-only preflight**, not an installer.
 The authoritative target is [spec v1.2](../../docs/rearchitecture-and-product-spec.md),
-especially sections 13–17. The existing app still uses Arena/Builder; the kits,
-generic agents, report delivery and passkey release protocol are not implemented
-by this milestone. Do not expose the existing token-based Builder supervisor.
+especially sections 13–17. Phase 1 implements kit grants and chat controls;
+generic agents, research tools, report delivery and passkey release approval
+remain pending. Do not expose the retained token-based release supervisor.
 
 ## Safe commands now
 

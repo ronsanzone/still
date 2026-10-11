@@ -17,6 +17,7 @@ const roots = [
   "test",
   "public",
   "tools",
+  "deploy",
   "extensions",
   ".agents/skills",
 ];

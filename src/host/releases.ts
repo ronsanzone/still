@@ -269,11 +269,11 @@ export async function openHost(settings: HostSettings) {
 
         if (
           file.startsWith("src/host/") ||
+          file.startsWith("src/kernel/") ||
+          file.startsWith("deploy/") ||
           [
             "src/server/chat.ts",
-            "src/server/delegation.ts",
-            "src/server/audit.ts",
-            "src/server/builder.ts",
+            "src/server/main.ts",
             "package.json",
             "package-lock.json",
           ].includes(file)

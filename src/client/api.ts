@@ -1,11 +1,10 @@
 import { Effect, Schema } from "effect";
 import {
   ApiProblem,
-  type GroupAction,
-  type LaunchGroup,
+  type Grant,
+  type Branch,
   type SendMessage,
 } from "../shared/contracts.ts";
-import type { BuilderStart, VersionAction } from "../shared/builder.ts";
 
 export function apiPath(path: string) {
   const preview = /^\/builder-preview\/[a-f0-9]{64}/.exec(location.pathname);
@@ -26,14 +25,10 @@ export const request = Effect.fn("Api.request")(function* <A>(
   schema: Schema.Codec<A>,
   payload?:
     | SendMessage
-    | LaunchGroup
-    | GroupAction
-    | BuilderStart
-    | VersionAction
-    | { readonly candidate: string }
+    | Grant
+    | Branch
     | { readonly model: string }
     | Record<string, never>,
-  ownerToken?: string,
 ) {
   const response = yield* Effect.tryPromise({
     try: (signal) =>
@@ -44,12 +39,11 @@ export const request = Effect.fn("Api.request")(function* <A>(
               method: "POST",
               headers: {
                 "content-type": "application/json",
-                "x-still-owner": ownerToken ?? "",
               },
               body: JSON.stringify(payload),
               signal,
             }
-          : { signal, headers: { "x-still-owner": ownerToken ?? "" } },
+          : { signal },
       ),
     catch: () =>
       new RequestFailure({

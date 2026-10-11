@@ -29,7 +29,7 @@ import {
 import { createRegistry } from "@earendil-works/pi-durable";
 import { Chats, ChatFailure } from "../src/server/chat.ts";
 import { ModelCatalog } from "../src/server/models.ts";
-import { loadExtensions } from "../src/server/builder.ts";
+import { loadExtensions } from "../src/kernel/extensions.ts";
 import { copySource, fingerprint, sourceFiles } from "../src/host/files.ts";
 import { openHost } from "../src/host/releases.ts";
 
@@ -123,6 +123,10 @@ describe("Explicit Builder authority and durable coding", () => {
           const admitted = yield* Effect.scoped(
             Effect.gen(function* () {
               const chats = yield* Chats;
+              yield* chats
+                .builder({ ...input, candidate: "missing-candidate" })
+                .pipe(Effect.flip);
+              expect(yield* chats.list()).toEqual([]);
               const ordinary = yield* chats.create("faux/faux-1");
               yield* chats.send(ordinary.id, {
                 text: "Hello",
@@ -150,7 +154,10 @@ describe("Explicit Builder authority and durable coding", () => {
                 Effect.map(Option.getOrThrow),
               );
 
-              expect(snapshot.builder).toBe(candidate);
+              expect(snapshot.grant).toEqual({
+                kit: "still",
+                target: candidate,
+              });
               expect(snapshot.tools?.map((tool) => tool.name)).toEqual([
                 "write",
                 "bash",
@@ -169,13 +176,7 @@ describe("Explicit Builder authority and durable coding", () => {
                 expect(mismatch.status).toBe(409);
 
               const recursive = yield* chats
-                .launch(first.id, {
-                  mode: "fresh",
-                  sourceEntry: null,
-                  task: "Delegate",
-                  models: ["faux/faux-1"],
-                  requestId: "no-recursion",
-                })
+                .kit(ordinary.id, { kit: "still", target: candidate })
                 .pipe(Effect.flip);
 
               expect(recursive).toBeInstanceOf(ChatFailure);

@@ -11,8 +11,8 @@ import { ModelCatalog } from "./models.ts";
 import {
   ChatId,
   CreateChat,
-  GroupAction,
-  LaunchGroup,
+  Branch,
+  Grant,
   SendMessage,
 } from "../shared/contracts.ts";
 import { BuilderAdmission } from "../shared/builder.ts";
@@ -135,10 +135,15 @@ const route = Effect.fn("Http.route")(function* (
     return;
   }
 
-  const parts =
-    /^\/api\/chats\/(\d+)\/(events|messages|stop|groups|group-action|audit)$/.exec(
-      pathname,
-    );
+  if (pathname === "/api/work" && request.method === "GET") {
+    json(response, 200, yield* chats.work());
+
+    return;
+  }
+
+  const parts = /^\/api\/chats\/(\d+)\/(events|messages|stop|kit|branch)$/.exec(
+    pathname,
+  );
 
   if (!parts)
     return yield* new ChatFailure({ message: "Not found.", status: 404 });
@@ -147,15 +152,9 @@ const route = Effect.fn("Http.route")(function* (
   if ((yield* chats.builderCandidate(id)) && !owner(request))
     return yield* new ChatFailure({
       message:
-        "This is a trusted-owner Builder conversation. Unlock Builder first.",
+        "This Still candidate requires supervisor authorization. Release controls are not yet available in this client.",
       status: 403,
     });
-
-  if (parts[2] === "audit" && request.method === "GET") {
-    json(response, 200, yield* chats.audit(id));
-
-    return;
-  }
 
   if (parts[2] === "events" && request.method === "GET") {
     yield* chats.watch(id).pipe(
@@ -191,27 +190,25 @@ const route = Effect.fn("Http.route")(function* (
     });
   const input = yield* body(request);
 
-  if (parts[2] === "groups") {
+  if (parts[2] === "kit") {
     json(
       response,
       202,
-      yield* chats.launch(
+      yield* chats.kit(
         id,
-        yield* Schema.decodeUnknownEffect(LaunchGroup)(input),
+        yield* Schema.decodeUnknownEffect(Grant)(input),
+        owner(request),
       ),
     );
 
     return;
   }
 
-  if (parts[2] === "group-action") {
+  if (parts[2] === "branch") {
     json(
       response,
       202,
-      yield* chats.groupAction(
-        id,
-        yield* Schema.decodeUnknownEffect(GroupAction)(input),
-      ),
+      yield* chats.branch(id, yield* Schema.decodeUnknownEffect(Branch)(input)),
     );
 
     return;

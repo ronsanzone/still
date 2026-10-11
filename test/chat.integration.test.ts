@@ -219,13 +219,13 @@ describe("Chats with Durable SQLite", () => {
             });
 
             const initial = yield* chats.watch(created.id).pipe(Stream.runHead);
-            expect(Option.getOrThrow(initial)).toEqual({
+            expect(Option.getOrThrow(initial)).toMatchObject({
               ...created,
               messages: [],
               busy: false,
               queued: 0,
-              groups: [],
-              entries: [],
+              cost: 0,
+              tools: [],
             });
 
             const input = {
@@ -261,6 +261,7 @@ describe("Chats with Durable SQLite", () => {
                 id: persisted.created.id,
                 title: "Remember this after reopening",
                 model: modelId,
+                grant: { kit: "chat", target: null },
               },
             ]);
 
@@ -286,9 +287,13 @@ describe("shared chat contracts", () => {
           id: 1,
           title: "A chat",
           model: modelId,
+          grant: { kit: "chat", target: null },
           messages: [],
           busy: false,
           queued: 0,
+          cost: 0,
+          tools: [],
+          changes: [],
         });
 
         expect(snapshot.id).toBe(1);

@@ -12,8 +12,7 @@ import {
   Readiness,
 } from "../src/shared/builder.ts";
 import { fingerprint, sourceFiles } from "../src/host/files.ts";
-import { Audit } from "../src/server/audit.ts";
-import { loadExtensions } from "../src/server/builder.ts";
+import { loadExtensions } from "../src/kernel/extensions.ts";
 
 // Real Linux process/filesystem workflow, with scripted faux model output and no provider credentials.
 const Settings = Schema.Struct({
@@ -236,14 +235,8 @@ async function exercise() {
       ["write", "write", "bash"],
     );
     assert(completed.tools?.every((tool) => !tool.failed));
-    const audit = await request(`/api/chats/${receipt.id}/audit`, Audit);
-    assert.equal(audit.requests.length, 4);
-    assert(audit.requests.every((item) => item.model === "faux/faux-1"));
-    assert(
-      audit.requests.every(
-        (item) => item.sessionHash === audit.requests[0]?.sessionHash,
-      ),
-    );
+    assert.equal(completed.grant.kit, "still");
+    assert.equal(completed.model, "faux/faux-1");
     const candidate = join(root, "candidates", task.requestId);
     assert.equal(
       await readFile(join(candidate, "public/builder-evidence.txt"), "utf8"),
@@ -397,10 +390,13 @@ async function exercise() {
     await direct.create("demo-extension-004");
     await direct.close();
     const broken = join(root, "candidates", brokenTask.requestId);
-    const main = await readFile(join(broken, "src/server/main.ts"), "utf8");
+    const main = await readFile(join(broken, "src/server/models.ts"), "utf8");
     await writeFile(
-      join(broken, "src/server/main.ts"),
-      `${main}\nconst liveDatabase = await runtime.runPromise(Config.String("STILL_DATABASE"));\n\nif (!liveDatabase.includes("/previews/"))\n  throw new Error("Injected live startup failure");\n`,
+      join(broken, "src/server/models.ts"),
+      main.replace(
+        "      const demo =",
+        '      const liveDatabase = yield* Config.String("STILL_DATABASE");\n\n      if (!liveDatabase.includes("/previews/"))\n        throw new Error("Injected live startup failure");\n\n      const demo =',
+      ),
     );
     await start();
     const checkedBroken = await request(
@@ -596,9 +592,9 @@ async function exercise() {
           activeRelease: validated.version,
           failedRelease: checkedBroken.version,
           conversationId: receipt.id,
-          requestAudit: audit,
+          reportedCost: completed.cost,
           usageEvidence:
-            "Faux simulation only. Logical hook hashes and synthetic usage do not establish wire payloads or provider-side KV/cache behavior.",
+            "Faux simulation only. Pi usage is not provider billing or physical KV/cache evidence. The legacy audit product has been removed.",
           evidence,
         },
         null,
