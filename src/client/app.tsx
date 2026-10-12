@@ -1,9 +1,11 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
 import {
   Activity,
@@ -64,7 +66,7 @@ function useWide() {
 }
 
 /** Sizes the shell to the visual viewport so the composer rides above the iOS keyboard. */
-function useVisualViewport(onResize: () => void) {
+function useVisualViewport() {
   useEffect(() => {
     const viewport = window.visualViewport;
 
@@ -78,7 +80,6 @@ function useVisualViewport(onResize: () => void) {
         "keyboard-open",
         window.innerHeight - viewport.height > 120,
       );
-      onResize();
     };
 
     update();
@@ -89,7 +90,80 @@ function useVisualViewport(onResize: () => void) {
       viewport.removeEventListener("resize", update);
       viewport.removeEventListener("scroll", update);
     };
-  }, [onResize]);
+  }, []);
+}
+
+/**
+ * Answer-first scrolling: open a chat at its latest exchange, bring a new
+ * prompt to the top once, then leave the view still while the answer streams
+ * below it. Nothing scrolls on its own during streaming.
+ */
+function useTurnScroll(
+  scroll: RefObject<HTMLDivElement | null>,
+  snapshot: ChatSnapshot | null,
+  page: View,
+) {
+  const shown = useRef<{ id: number; prompts: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const node = scroll.current;
+
+    if (!node || !snapshot || page !== "chat") {
+      shown.current = null;
+
+      return;
+    }
+
+    const prompts = snapshot.messages.filter(
+      (item) => item.role === "user",
+    ).length;
+
+    const previous = shown.current;
+    shown.current = { id: snapshot.id, prompts };
+
+    if (previous?.id !== snapshot.id) {
+      node.scrollTop = node.scrollHeight;
+
+      return;
+    }
+
+    const turns = node.querySelectorAll(".turn.user");
+    const latest = turns[turns.length - 1];
+
+    if (prompts > previous.prompts && latest)
+      node.scrollTo({
+        top:
+          node.scrollTop +
+          latest.getBoundingClientRect().top -
+          node.getBoundingClientRect().top -
+          8,
+        behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "auto"
+          : "smooth",
+      });
+  }, [scroll, snapshot, page]);
+
+  // The latest exchange is at least one viewport tall (see .current-turn).
+  // When the keyboard shrinks the view, keep the bottom in place if it was showing.
+  useEffect(() => {
+    const node = scroll.current;
+
+    if (!node || page !== "chat") return;
+    let height = node.clientHeight;
+
+    const observer = new ResizeObserver(() => {
+      const before = height;
+      height = node.clientHeight;
+      node.style.setProperty("--scroller-height", `${height}px`);
+
+      if (height < before && node.scrollHeight - node.scrollTop - before < 8)
+        node.scrollTop = node.scrollHeight;
+    });
+
+    observer.observe(node);
+
+    return () => observer.disconnect();
+  }, [scroll, page]);
 }
 
 const kitIcons = { chat: MessageSquare, research: Globe, still: ShieldAlert };
@@ -119,7 +193,6 @@ export function App() {
   const [newKit, setNewKit] = useState<"chat" | "research">("chat");
   const scroll = useRef<HTMLDivElement>(null);
   const inFlight = useRef(false);
-  const stick = useRef(true);
   const wide = useWide();
   const page = wide && view === "chats" ? "chat" : view;
 
@@ -137,12 +210,8 @@ export function App() {
     );
   }
 
-  const toBottom = useCallback(() => {
-    if (stick.current && scroll.current)
-      scroll.current.scrollTop = scroll.current.scrollHeight;
-  }, []);
-
-  useVisualViewport(toBottom);
+  useVisualViewport();
+  useTurnScroll(scroll, snapshot, page);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -179,7 +248,6 @@ export function App() {
     history.replaceState(null, "", url);
     setSnapshot(null);
     setConnected(false);
-    stick.current = true;
 
     if (!active) return;
     let first = true;
@@ -204,10 +272,29 @@ export function App() {
         first = false;
       }
 
-      setChats((items) => [
-        value,
-        ...items.filter((item) => item.id !== value.id),
-      ]);
+      setChats((items) => {
+        const known = items[0];
+
+        // Streaming sends many snapshots; the list only changes with the summary.
+        if (
+          known?.id === value.id &&
+          known.title === value.title &&
+          known.model === value.model &&
+          known.grant.kit === value.grant.kit &&
+          known.grant.target === value.grant.target
+        )
+          return items;
+
+        return [
+          {
+            id: value.id,
+            title: value.title,
+            model: value.model,
+            grant: value.grant,
+          },
+          ...items.filter((item) => item.id !== value.id),
+        ];
+      });
     };
 
     events.onerror = () => setConnected(false);
@@ -239,7 +326,6 @@ export function App() {
   useEffect(() => {
     localStorage.setItem(`still:v1:draft:${active ?? "new"}`, draft);
   }, [draft, active]);
-  useEffect(toBottom, [snapshot, page, toBottom]);
 
   function selectChat(id: number | null) {
     if (preparing) return;
@@ -318,7 +404,6 @@ export function App() {
         setDraft("");
         setUploads([]);
         setReuseEntry(undefined);
-        stick.current = true;
       } else {
         setError(result.failure.message);
 
@@ -388,6 +473,15 @@ export function App() {
       setSending(false);
     }
   }
+
+  // A stable callback lets unchanged turns skip re-rendering while an answer streams.
+  const latestFork = useRef(forkPrompt);
+  latestFork.current = forkPrompt;
+
+  const onFork = useCallback(
+    (item: Message, retry: boolean) => void latestFork.current(item, retry),
+    [],
+  );
 
   function changeKit(kit: Grant["kit"]) {
     if (!active) {
@@ -515,18 +609,7 @@ export function App() {
               </div>
               {newChatButton}
             </header>
-            <div
-              className="scroller"
-              ref={scroll}
-              onScroll={() => {
-                const node = scroll.current;
-
-                if (node)
-                  stick.current =
-                    node.scrollHeight - node.scrollTop - node.clientHeight <
-                    100;
-              }}
-            >
+            <div className="scroller" ref={scroll}>
               {empty ? (
                 <section className="welcome">
                   <h2>Ask anything.</h2>
@@ -559,7 +642,7 @@ export function App() {
                     null
                   }
                   locked={locked}
-                  onFork={(item, retry) => void forkPrompt(item, retry)}
+                  onFork={onFork}
                   onOpenParent={() => selectChat(snapshot.parent ?? null)}
                 />
               )}

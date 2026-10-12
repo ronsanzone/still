@@ -1,3 +1,4 @@
+import { memo, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -180,15 +181,29 @@ function WorkSummary({ tools }: { readonly tools: readonly Tool[] }) {
   );
 }
 
-function UserTurn({
-  item,
-  locked,
-  onFork,
-}: {
+/** Snapshots are decoded fresh on every event; compare content, not identity. */
+export function sameMessage(left: Message, right: Message) {
+  return (
+    left.id === right.id &&
+    left.text === right.text &&
+    left.thinking === right.thinking &&
+    left.failed === right.failed &&
+    left.interrupted === right.interrupted &&
+    left.cost === right.cost &&
+    left.model === right.model &&
+    left.before === right.before &&
+    left.images?.length === right.images?.length &&
+    left.attachmentText === right.attachmentText
+  );
+}
+
+interface TurnProps {
   readonly item: Message;
   readonly locked: boolean;
   readonly onFork: (item: Message, retry: boolean) => void;
-}) {
+}
+
+const UserTurn = memo(function UserTurn({ item, locked, onFork }: TurnProps) {
   return (
     <article className="turn user" aria-label="You">
       <div className="bubble">
@@ -230,58 +245,93 @@ function UserTurn({
       )}
     </article>
   );
+}, sameTurn);
+
+function sameTurn(left: TurnProps, right: TurnProps) {
+  return (
+    left.locked === right.locked &&
+    left.onFork === right.onFork &&
+    sameMessage(left.item, right.item)
+  );
 }
 
-function AssistantTurn({
-  item,
-  live,
-  retry,
-  locked,
-}: {
-  readonly item: Message;
+interface AssistantProps extends TurnProps {
   readonly live: boolean;
-  readonly retry: (() => void) | null;
-  readonly locked: boolean;
-}) {
-  return (
-    <article
-      className={`turn assistant ${live ? "is-live" : ""}`}
-      aria-label="Still"
-      aria-busy={live}
-    >
-      {item.thinking && (
-        <details className="thinking">
-          <summary>Thought process</summary>
-          <p>{item.thinking}</p>
-        </details>
-      )}
-      {item.text && (
-        <div className="answer">
-          <Markdown remarkPlugins={gfm}>{item.text}</Markdown>
-        </div>
-      )}
-      {item.failed && (
-        <div className="failure" role="group" aria-label="Response failed">
-          <p>
-            <TriangleAlert size={16} aria-hidden="true" /> The response failed.
-            Nothing was lost; retrying starts a new branch.
+  /** The prompt this answer replies to; retry forks before it. */
+  readonly prompt: Message | null;
+}
+
+const AssistantTurn = memo(
+  function AssistantTurn({
+    item,
+    live,
+    prompt,
+    locked,
+    onFork,
+  }: AssistantProps) {
+    const retry = prompt?.before ? () => onFork(prompt, true) : null;
+
+    return (
+      <article
+        className={`turn assistant ${live ? "is-live" : ""}`}
+        aria-label="Still"
+        aria-busy={live}
+      >
+        {item.thinking && !(live && !item.text) && (
+          <details className="thinking">
+            <summary>Thought process</summary>
+            <p>{item.thinking}</p>
+          </details>
+        )}
+        {item.text && (
+          <div className="answer">
+            <Markdown remarkPlugins={gfm}>{item.text}</Markdown>
+          </div>
+        )}
+        {item.failed && (
+          <div className="failure" role="group" aria-label="Response failed">
+            <p>
+              <TriangleAlert size={16} aria-hidden="true" /> The response
+              failed. Nothing was lost; retrying starts a new branch.
+            </p>
+            {retry && (
+              <button type="button" disabled={locked} onClick={retry}>
+                <RotateCcw size={14} aria-hidden="true" /> Retry in a new branch
+              </button>
+            )}
+          </div>
+        )}
+        {(item.model || item.interrupted) && !live && (
+          <p className="meta">
+            {item.interrupted && <span className="tag">Stopped</span>}
+            {item.model && <span>{shortModel(item.model)}</span>}
+            {item.cost !== undefined && <span>{formatCost(item.cost)}</span>}
           </p>
-          {retry && (
-            <button type="button" disabled={locked} onClick={retry}>
-              <RotateCcw size={14} aria-hidden="true" /> Retry in a new branch
-            </button>
-          )}
-        </div>
-      )}
-      {(item.model || item.interrupted) && !live && (
-        <p className="meta">
-          {item.interrupted && <span className="tag">Stopped</span>}
-          {item.model && <span>{shortModel(item.model)}</span>}
-          {item.cost !== undefined && <span>{formatCost(item.cost)}</span>}
-        </p>
-      )}
-    </article>
-  );
+        )}
+      </article>
+    );
+  },
+  function sameAssistant(left, right) {
+    return (
+      sameTurn(left, right) &&
+      left.live === right.live &&
+      (left.prompt === null) === (right.prompt === null) &&
+      (left.prompt === null ||
+        right.prompt === null ||
+        sameMessage(left.prompt, right.prompt))
+    );
+  },
+);
+
+/** The latest line of live reasoning, so a long think shows progress. */
+export function thinkingPreview(thinking: string) {
+  const line =
+    thinking
+      .split("\n")
+      .map((part) => part.trim())
+      .findLast(Boolean) ?? "";
+
+  return line.length > 140 ? `…${line.slice(-140)}` : line;
 }
 
 export function Timeline({
@@ -306,6 +356,76 @@ export function Timeline({
     last.message.role === "assistant" &&
     Boolean(last.message.text);
 
+  const thought = snapshot.busy
+    ? thinkingPreview(
+        snapshot.messages.find((item) => item.entry === null)?.thinking ?? "",
+      )
+    : "";
+
+  let prompt: Message | null = null;
+
+  const nodes = items.map((item) => {
+    if (item.kind === "work")
+      return <WorkSummary key={item.key} tools={item.tools} />;
+
+    if (item.kind === "change")
+      return (
+        <p key={item.key} className="system-line">
+          {item.text}
+        </p>
+      );
+
+    const message = item.message;
+
+    if (message.role === "user") {
+      prompt = message;
+
+      return (
+        <UserTurn
+          key={item.key}
+          item={message}
+          locked={locked}
+          onFork={onFork}
+        />
+      );
+    }
+
+    return (
+      <AssistantTurn
+        key={item.key}
+        item={message}
+        live={snapshot.busy && message.entry === null}
+        locked={locked}
+        onFork={onFork}
+        prompt={prompt}
+      />
+    );
+  });
+
+  // The latest exchange fills the viewport, so a new prompt can sit at the top
+  // while its answer grows below it without moving anything.
+  const split = items.findLastIndex(
+    (item) => item.kind === "message" && item.message.role === "user",
+  );
+
+  const history = split < 0 ? nodes : nodes.slice(0, split);
+
+  const current: ReactNode[] = [
+    ...(split < 0 ? [] : nodes.slice(split)),
+    snapshot.busy && !streaming && (
+      <div key="thinking" className="thinking-pill">
+        <span className="pulse" aria-hidden="true" />
+        <span role="status">Thinking…</span>
+        {thought && (
+          <span className="thought" aria-hidden="true">
+            {thought}
+          </span>
+        )}
+      </div>
+    ),
+    <Sources key="sources" snapshot={snapshot} />,
+  ];
+
   return (
     <div className="timeline">
       {snapshot.parent && (
@@ -320,56 +440,8 @@ export function Timeline({
           </span>
         </p>
       )}
-      {items.map((item, index) => {
-        if (item.kind === "work")
-          return <WorkSummary key={item.key} tools={item.tools} />;
-
-        if (item.kind === "change")
-          return (
-            <p key={item.key} className="system-line">
-              {item.text}
-            </p>
-          );
-
-        const message = item.message;
-
-        if (message.role === "user")
-          return (
-            <UserTurn
-              key={item.key}
-              item={message}
-              locked={locked}
-              onFork={onFork}
-            />
-          );
-
-        const prompt = items
-          .slice(0, index)
-          .findLast(
-            (previous) =>
-              previous.kind === "message" && previous.message.role === "user",
-          );
-
-        return (
-          <AssistantTurn
-            key={item.key}
-            item={message}
-            live={snapshot.busy && message.entry === null}
-            locked={locked}
-            retry={
-              prompt?.kind === "message" && prompt.message.before
-                ? () => onFork(prompt.message, true)
-                : null
-            }
-          />
-        );
-      })}
-      {snapshot.busy && !streaming && (
-        <p className="thinking-pill" role="status">
-          <span className="pulse" aria-hidden="true" /> Thinking…
-        </p>
-      )}
-      <Sources snapshot={snapshot} />
+      {history}
+      {split < 0 ? current : <div className="current-turn">{current}</div>}
     </div>
   );
 }

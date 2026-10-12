@@ -3,7 +3,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { ChatSnapshot, Message } from "../src/shared/contracts.ts";
 import {
   describeChange,
+  sameMessage,
   summarizeWork,
+  thinkingPreview,
   Timeline,
   timeline,
 } from "../src/client/timeline.tsx";
@@ -212,6 +214,54 @@ describe("Timeline rendering", () => {
     expect(html).toContain('role="status"');
     expect(html).toContain("Thinking…");
   });
+
+  it("previews the latest line of live reasoning while thinking", () => {
+    const live = message("live", "assistant", null, "", {
+      thinking:
+        "First consider WAL.\n\nThen check fsync on network file systems.",
+    });
+
+    const html = renderToStaticMarkup(
+      <Timeline
+        snapshot={snapshot({ busy: true, messages: [ask, live] })}
+        parentTitle={null}
+        locked
+        onFork={noop}
+        onOpenParent={noop}
+      />,
+    );
+
+    expect(html).toContain("Then check fsync on network file systems.");
+    expect(html).not.toContain("Thought process");
+    expect(thinkingPreview("x".repeat(200))).toBe(`…${"x".repeat(140)}`);
+  });
+
+  it("keeps the latest exchange in one viewport-tall group", () => {
+    const html = renderToStaticMarkup(
+      <Timeline
+        snapshot={research}
+        parentTitle={null}
+        locked={false}
+        onFork={noop}
+        onOpenParent={noop}
+      />,
+    );
+
+    const group = html.slice(html.indexOf('class="current-turn"'));
+
+    expect(group).toContain("Is example.com safe to cite?");
+    expect(group).toContain("Yes [1].");
+    expect(html.indexOf("Switched to Research kit")).toBeLessThan(
+      html.indexOf('class="current-turn"'),
+    );
+  });
+
+  it("treats freshly decoded but identical messages as unchanged", () => {
+    expect(sameMessage(answer, { ...answer })).toBe(true);
+    expect(sameMessage(answer, { ...answer, text: "Yes [1]. More" })).toBe(
+      false,
+    );
+  });
 });
 
 const composer: ComposerProps = {
@@ -267,6 +317,9 @@ describe("Composer", () => {
     expect(queue).toContain("1 queued");
     expect(steer).toContain('aria-label="Steer"');
     expect(steer).toMatch(/aria-checked="true"[^>]*>Steer/);
+    // Locked model and kit give way to Queue/Steer so the composer keeps its height.
+    expect(queue).not.toContain('aria-label="Model"');
+    expect(queue).not.toContain('aria-label="Kit"');
   });
 
   it("labels a saved unsent input as a retry", () => {

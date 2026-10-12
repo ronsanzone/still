@@ -85,35 +85,6 @@ export function Composer(props: ComposerProps) {
         props.onSend();
       }}
     >
-      {props.busy && (
-        <div className="busy-row">
-          <div
-            className="segmented"
-            role="radiogroup"
-            aria-label="While Still is answering"
-          >
-            {(["followUp", "steer"] as const).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                role="radio"
-                aria-checked={props.whenBusy === mode}
-                onClick={() => props.onWhenBusy(mode)}
-              >
-                {mode === "steer" ? "Steer" : "Queue"}
-              </button>
-            ))}
-          </div>
-          <span className="busy-hint">
-            {props.whenBusy === "steer"
-              ? "Joins the current answer at the next step"
-              : "Sends after this answer"}
-          </span>
-          {props.queued > 0 && (
-            <span className="badge">{props.queued} queued</span>
-          )}
-        </div>
-      )}
       {props.uploads.length > 0 && (
         <ul className="pending-uploads" aria-label="Files to send">
           {props.uploads.map((file, index) => (
@@ -156,7 +127,7 @@ export function Composer(props: ComposerProps) {
           aria-label="Message Still"
           placeholder={props.busy ? "Queue or steer…" : "Ask anything…"}
           value={props.draft}
-          readOnly={props.sending || props.pending}
+          readOnly={props.pending}
           maxLength={16000}
           rows={1}
           onChange={(event) => props.onDraft(event.target.value)}
@@ -197,53 +168,91 @@ export function Composer(props: ComposerProps) {
         </button>
       </div>
       <div className="context-bar">
-        <label className={`chip ${props.model ? "" : "is-empty"}`}>
-          <span className="chip-text" aria-hidden="true">
-            {props.model ? shortModel(props.model) : "Choose a model"}
-          </span>
-          <select
-            aria-label="Model"
-            value={props.model}
-            disabled={props.locked || props.pending}
-            onChange={(event) => props.onModel(event.target.value)}
-          >
-            <option value="">Choose a model</option>
-            {props.models.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-          <ChevronDown size={14} aria-hidden="true" />
-        </label>
-        <label className={`chip kit-${props.kit}`}>
-          <KitIcon size={14} aria-hidden="true" />
-          <span className="chip-text" aria-hidden="true">
-            {kits[props.kit].label}
-          </span>
-          <select
-            aria-label="Kit"
-            value={props.kit}
-            disabled={props.locked}
-            onChange={(event) => {
-              const value = event.target.value;
-
-              if (value === "chat" || value === "research" || value === "still")
-                props.onKit(value);
-            }}
-          >
-            {(["chat", "research", "still"] as const).map((kit) => (
-              <option
-                key={kit}
-                value={kit}
-                disabled={kit === "still" && !props.canChooseStill}
+        {/* While answering, model and kit are locked, so Queue/Steer takes
+            their place and the composer keeps one height for the whole turn. */}
+        {props.busy ? (
+          <>
+            <div
+              className="segmented"
+              role="radiogroup"
+              aria-label="While Still is answering"
+            >
+              {(["followUp", "steer"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  role="radio"
+                  aria-checked={props.whenBusy === mode}
+                  onClick={() => props.onWhenBusy(mode)}
+                >
+                  {mode === "steer" ? "Steer" : "Queue"}
+                </button>
+              ))}
+            </div>
+            <span className="busy-hint">
+              {props.whenBusy === "steer"
+                ? "Joins the current answer at the next step"
+                : "Sends after this answer"}
+            </span>
+            {props.queued > 0 && (
+              <span className="badge">{props.queued} queued</span>
+            )}
+          </>
+        ) : (
+          <>
+            <label className={`chip ${props.model ? "" : "is-empty"}`}>
+              <span className="chip-text" aria-hidden="true">
+                {props.model ? shortModel(props.model) : "Choose a model"}
+              </span>
+              <select
+                aria-label="Model"
+                value={props.model}
+                disabled={props.locked || props.pending}
+                onChange={(event) => props.onModel(event.target.value)}
               >
-                {kits[kit].label} · {kits[kit].authority}
-              </option>
-            ))}
-          </select>
-          <ChevronDown size={14} aria-hidden="true" />
-        </label>
+                <option value="">Choose a model</option>
+                {props.models.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown size={14} aria-hidden="true" />
+            </label>
+            <label className={`chip kit-${props.kit}`}>
+              <KitIcon size={14} aria-hidden="true" />
+              <span className="chip-text" aria-hidden="true">
+                {kits[props.kit].label}
+              </span>
+              <select
+                aria-label="Kit"
+                value={props.kit}
+                disabled={props.locked}
+                onChange={(event) => {
+                  const value = event.target.value;
+
+                  if (
+                    value === "chat" ||
+                    value === "research" ||
+                    value === "still"
+                  )
+                    props.onKit(value);
+                }}
+              >
+                {(["chat", "research", "still"] as const).map((kit) => (
+                  <option
+                    key={kit}
+                    value={kit}
+                    disabled={kit === "still" && !props.canChooseStill}
+                  >
+                    {kits[kit].label} · {kits[kit].authority}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown size={14} aria-hidden="true" />
+            </label>
+          </>
+        )}
         <span
           className="cost"
           title="Reported by the provider; not a billing guarantee"
