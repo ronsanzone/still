@@ -33,7 +33,11 @@ const temporaryDatabase = Effect.acquireRelease(
     Effect.promise(() => rm(directory, { force: true, recursive: true })),
 ).pipe(Effect.map((directory) => join(directory, "chat.sqlite")));
 
-function testLayer(database: string, responses: readonly string[]) {
+function testLayer(
+  database: string,
+  responses: readonly string[],
+  offered = [{ id: modelId, name: "Faux Model", provider: "faux" }],
+) {
   const faux = fauxProvider({ tokensPerSecond: 0 });
   faux.setResponses(responses.map((text) => fauxAssistantMessage(text)));
 
@@ -44,7 +48,7 @@ function testLayer(database: string, responses: readonly string[]) {
     ModelCatalog,
     ModelCatalog.of({
       runtime,
-      choices: [{ id: modelId, name: "Faux Model", provider: "faux" }],
+      choices: offered,
     }),
   );
 
@@ -184,6 +188,24 @@ describe("Chats with Durable SQLite", () => {
           // Durable deliberately omits an empty assistant entry when stopped before any text.
           expect(stopped.messages.map((item) => item.role)).toEqual(["user"]);
         }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
+  it.effect("rejects provider models that are not offered", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        const hidden = testLayer(database, ["Unused"], []);
+
+        const failure = yield* Effect.gen(function* () {
+          const chats = yield* Chats;
+
+          return yield* chats.create(modelId).pipe(Effect.flip);
+        }).pipe(Effect.provide(hidden.layer));
+
+        expect(failure).toBeInstanceOf(ChatFailure);
+        expect(failure.status).toBe(400);
       }),
     ),
   );
