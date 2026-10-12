@@ -157,6 +157,39 @@ describe("Timeline rendering", () => {
     expect(html.indexOf("Yes [1].")).toBeLessThan(html.indexOf("Sources"));
   });
 
+  it("lists cited sources and folds uncited search results", () => {
+    const source = (number: number) => ({
+      number,
+      url: `https://example.com/${number}`,
+      title: `Result ${number}`,
+      fetchedAt: "2026-10-11T18:02:11Z",
+    });
+
+    const html = renderToStaticMarkup(
+      <Timeline
+        snapshot={snapshot({
+          messages: [
+            ask,
+            message("7-0", "assistant", 7, "Yes [1], see also [3, 4]."),
+          ],
+          citations: [1, 2, 3, 4, 5].map(source),
+        })}
+        parentTitle={null}
+        locked={false}
+        onFork={noop}
+        onOpenParent={noop}
+      />,
+    );
+
+    const [shown = "", folded = ""] = html.split('class="more-sources"');
+
+    for (const number of [1, 3, 4]) expect(shown).toContain(`Result ${number}`);
+    expect(shown).not.toContain("Result 2");
+    expect(folded).toContain("2 more results");
+    expect(folded).toContain("Result 2");
+    expect(folded).toContain("Result 5");
+  });
+
   it("offers retry in a branch for a failed answer and marks branches", () => {
     const html = renderToStaticMarkup(
       <Timeline

@@ -710,6 +710,17 @@ details[open] > summary::after {
   font-size: 13px;
   margin-top: 4px;
 }
+.more-sources summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--muted);
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+}
+.more-sources ol {
+  margin-top: 6px;
+}
 .caption {
   font-size: 12px;
   color: var(--muted);

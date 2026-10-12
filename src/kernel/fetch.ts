@@ -62,6 +62,21 @@ export function webUrl(value: string) {
   return url;
 }
 
+/**
+ * Provenance identity for a page. Scheme, a leading "www.", default ports, a
+ * trailing slash and the fragment do not change which page is meant; host,
+ * path, query and non-default ports do. DNS and address checks still apply to
+ * whichever variant is fetched.
+ */
+export function urlKey(value: string) {
+  const url = new URL(value);
+  const host = url.hostname.replace(/^www\./, "");
+  const port = url.port ? `:${url.port}` : "";
+  const path = url.pathname.replace(/(.)\/$/, "$1");
+
+  return `${host}${port}${path}${url.search}`;
+}
+
 export class ConfirmationRequired extends Error {
   constructor(readonly url: string) {
     super("URL requires explicit confirmation");

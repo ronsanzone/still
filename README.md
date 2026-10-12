@@ -80,8 +80,11 @@ explicitly supplied public URLs needs no search credential. Live search pricing
 and quotas are operator decisions; verification uses local/fake adapters only.
 
 Each URL, including redirect destinations, must occur in native user input,
-successful search/fetch provenance, or an explicit owner confirmation. There is
-no wildcard origin grant. DNS answers are checked and the connection is pinned to
+successful search/fetch provenance, or an explicit owner confirmation. URLs are
+compared by page identity: scheme, a leading `www.`, default ports, a trailing
+slash and the fragment are ignored; host, path and query must match. There is
+no wildcard origin grant. Search results are numbered sources the answer can
+cite; a fetched page keeps its search number. DNS answers are checked and the connection is pinned to
 the checked address while retaining Host/SNI and TLS verification. Private,
 reserved, metadata, tailnet and mapped addresses are denied; redirects recheck
 both provenance and DNS. DNS/connect and idle reads time out after 60 seconds.

@@ -454,59 +454,112 @@ function host(url: string) {
   }
 }
 
+/** Source numbers an answer actually cites, e.g. [1] or [2, 3]. */
+export function citedNumbers(messages: readonly Message[]) {
+  const cited = new Set<number>();
+
+  for (const message of messages)
+    if (message.role === "assistant")
+      for (const group of message.text.matchAll(/\[(\d+(?:\s*,\s*\d+)*)\]/g))
+        for (const number of (group[1] ?? "").split(","))
+          cited.add(Number(number.trim()));
+
+  return cited;
+}
+
+function SourceRow({
+  source,
+  snapshot,
+}: {
+  readonly source: ChatSnapshot["citations"][number];
+  readonly snapshot: ChatSnapshot;
+}) {
+  const hash = source.url.startsWith("attachment:")
+    ? source.url.slice(11)
+    : null;
+
+  const pdf =
+    hash !== null &&
+    snapshot.attachments.some(
+      (file) => file.sha256 === hash && file.mimeType === "application/pdf",
+    );
+
+  return (
+    <li>
+      <span className="source-number">{source.number}</span>
+      <span className="source-body">
+        {hash === null ? (
+          <a href={source.url} target="_blank" rel="noreferrer">
+            {source.title}
+          </a>
+        ) : (
+          <strong>{source.title}</strong>
+        )}
+        <small>
+          {hash === null ? host(source.url) : "Uploaded file"} ·{" "}
+          <time dateTime={source.fetchedAt}>
+            {source.fetchedAt.slice(0, 16).replace("T", " ")}
+          </time>
+        </small>
+        {pdf && (
+          <a
+            className="download"
+            href={apiPath(`/api/chats/${snapshot.id}/attachments/${hash}`)}
+          >
+            <Download size={14} aria-hidden="true" /> Original PDF
+          </a>
+        )}
+      </span>
+    </li>
+  );
+}
+
+/** Cited sources first; other search results stay folded so work stays summarized. */
 function Sources({ snapshot }: { readonly snapshot: ChatSnapshot }) {
   if (!snapshot.citations.length && !snapshot.attachments.length) return null;
+  const cited = citedNumbers(snapshot.messages);
+
+  const shown = snapshot.citations.filter(
+    (source) =>
+      cited.has(source.number) || source.url.startsWith("attachment:"),
+  );
+
+  const others = snapshot.citations.filter((source) => !shown.includes(source));
 
   return (
     <section className="sources" aria-label="Sources and files">
       {snapshot.citations.length > 0 && (
         <>
           <h2>Sources</h2>
-          <ol>
-            {snapshot.citations.map((source) => {
-              const hash = source.url.startsWith("attachment:")
-                ? source.url.slice(11)
-                : null;
-
-              const pdf =
-                hash !== null &&
-                snapshot.attachments.some(
-                  (file) =>
-                    file.sha256 === hash && file.mimeType === "application/pdf",
-                );
-
-              return (
-                <li key={`${source.number}-${source.url}`}>
-                  <span className="source-number">{source.number}</span>
-                  <span className="source-body">
-                    {hash === null ? (
-                      <a href={source.url} target="_blank" rel="noreferrer">
-                        {source.title}
-                      </a>
-                    ) : (
-                      <strong>{source.title}</strong>
-                    )}
-                    <small>
-                      {hash === null ? host(source.url) : "Uploaded file"} ·{" "}
-                      <time dateTime={source.fetchedAt}>
-                        {source.fetchedAt.slice(0, 16).replace("T", " ")}
-                      </time>
-                    </small>
-                    {pdf && (
-                      <a
-                        className="download"
-                        href={apiPath(
-                          `/api/chats/${snapshot.id}/attachments/${hash}`,
-                        )}
-                      >
-                        <Download size={14} aria-hidden="true" /> Original PDF
-                      </a>
-                    )}
-                  </span>
-                </li>
-              );
-            })}
-          </ol>
+          {shown.length > 0 && (
+            <ol>
+              {shown.map((source) => (
+                <SourceRow
+                  key={`${source.number}-${source.url}`}
+                  source={source}
+                  snapshot={snapshot}
+                />
+              ))}
+            </ol>
+          )}
+          {others.length > 0 && (
+            <details className="more-sources">
+              <summary>
+                {shown.length > 0
+                  ? `${others.length} more ${others.length === 1 ? "result" : "results"}`
+                  : `${others.length} ${others.length === 1 ? "source" : "sources"}`}
+              </summary>
+              <ol>
+                {others.map((source) => (
+                  <SourceRow
+                    key={`${source.number}-${source.url}`}
+                    source={source}
+                    snapshot={snapshot}
+                  />
+                ))}
+              </ol>
+            </details>
+          )}
           <p className="caption">
             Recorded sources, not verification of the answer.
           </p>
