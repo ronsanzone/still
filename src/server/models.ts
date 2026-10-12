@@ -106,11 +106,26 @@ export class ModelCatalog extends Context.Service<
 
       if (Option.isSome(openai)) runtime.setProvider(openaiProvider());
 
-      const choices = runtime.getModels().map((model) => ({
-        id: `${model.provider}/${model.id}`,
-        name: model.name,
-        provider: model.provider,
-      }));
+      // Optional comma-separated `provider/model` allowlist, e.g. free models only for testing.
+      const allowlist = yield* Config.String("STILL_MODEL_ALLOWLIST").pipe(
+        Config.withDefault(""),
+      );
+
+      const allowed = new Set(
+        allowlist
+          .split(",")
+          .map((id) => id.trim())
+          .filter(Boolean),
+      );
+
+      const choices = runtime
+        .getModels()
+        .map((model) => ({
+          id: `${model.provider}/${model.id}`,
+          name: model.name,
+          provider: model.provider,
+        }))
+        .filter((choice) => allowed.size === 0 || allowed.has(choice.id));
 
       choices.sort((a, b) => a.name.localeCompare(b.name));
 

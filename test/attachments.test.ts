@@ -103,7 +103,10 @@ it("admits native image/PDF context once, preserves it in edit branches and afte
     Layer.provide(
       Layer.succeed(
         ModelCatalog,
-        ModelCatalog.of({ runtime: models, choices: [] }),
+        ModelCatalog.of({
+          runtime: models,
+          choices: [{ id: "faux/faux-1", name: "Faux", provider: "faux" }],
+        }),
       ),
     ),
     Layer.provide(

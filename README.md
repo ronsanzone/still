@@ -60,7 +60,9 @@ supervisor, use a fresh `STILL_HOST_ROOT`; do not activate this baseline over it
 old live database. Browser storage uses a new `still:v1` namespace.
 
 Configure server-side `OPENCODE_GO_API_KEY`, `ANTHROPIC_API_KEY`, or
-`OPENAI_API_KEY` for real requests. Credentials are never sent to the browser.
+`OPENAI_API_KEY` for real requests. Optional `STILL_MODEL_ALLOWLIST` (comma-separated
+`provider/model` IDs) limits both the offered and the accepted models, for
+example to confirmed-free models during testing. Credentials are never sent to the browser.
 Models can incur charges. Tests and explicit `STILL_FAUX_DEMO` use a scripted
 faux provider; credential failure never enables a fallback. Live development
 tests require explicit selection of a currently verified free model.

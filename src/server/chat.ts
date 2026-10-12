@@ -307,7 +307,8 @@ export class Chats extends Context.Service<
           .getModels()
           .find((item) => `${item.provider}/${item.id}` === model);
 
-        if (!selected)
+        // Choices are the offered models; the server accepts nothing else.
+        if (!selected || !catalog.choices.some((choice) => choice.id === model))
           throw new ChatFailure({
             message: "Choose an available model.",
             status: 400,
