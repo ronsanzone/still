@@ -1,4 +1,5 @@
 import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   Download,
   FileText,
@@ -14,6 +15,9 @@ import { AttachmentDisplay } from "./attachments.tsx";
 import { formatCost, shortModel } from "./format.ts";
 
 type Tool = ChatSnapshot["tools"][number];
+
+/** Tables, task lists, strikethrough and autolinks in answers. */
+const gfm = [remarkGfm];
 
 export type TimelineItem =
   | {
@@ -188,7 +192,7 @@ function UserTurn({
   return (
     <article className="turn user" aria-label="You">
       <div className="bubble">
-        <Markdown>{item.text}</Markdown>
+        <Markdown remarkPlugins={gfm}>{item.text}</Markdown>
         {item.images?.map((image, index) => (
           <img
             className="attachment-image"
@@ -253,7 +257,7 @@ function AssistantTurn({
       )}
       {item.text && (
         <div className="answer">
-          <Markdown>{item.text}</Markdown>
+          <Markdown remarkPlugins={gfm}>{item.text}</Markdown>
         </div>
       )}
       {item.failed && (

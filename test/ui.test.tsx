@@ -173,6 +173,31 @@ describe("Timeline rendering", () => {
     expect(html).toContain("Original chat");
   });
 
+  it("renders GitHub-flavored Markdown tables in answers", () => {
+    const html = renderToStaticMarkup(
+      <Timeline
+        snapshot={snapshot({
+          messages: [
+            ask,
+            message(
+              "4-0",
+              "assistant",
+              4,
+              "| Mode | Durable |\n|---|---|\n| WAL | yes |",
+            ),
+          ],
+        })}
+        parentTitle={null}
+        locked={false}
+        onFork={noop}
+        onOpenParent={noop}
+      />,
+    );
+
+    expect(html).toContain("<table>");
+    expect(html).toContain("<td>WAL</td>");
+  });
+
   it("shows thinking while busy with no answer text yet", () => {
     const html = renderToStaticMarkup(
       <Timeline
