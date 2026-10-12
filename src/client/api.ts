@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect";
 import type { FetchDecision } from "../shared/research.ts";
 import type { PushSubscription, PushEvent } from "../shared/push.ts";
+import type { FeedbackInput } from "../shared/feedback.ts";
 import {
   ApiProblem,
   type Grant,
@@ -32,6 +33,7 @@ export const request = Effect.fn("Api.request")(function* <A>(
     | FetchDecision
     | PushSubscription
     | PushEvent
+    | FeedbackInput
     | { readonly endpoint: string }
     | { readonly model: string }
     | Record<string, never>,

@@ -18,6 +18,7 @@ import {
 import { BuilderAdmission } from "../shared/builder.ts";
 import { FetchDecision } from "../shared/research.ts";
 import { PushSubscription, PushEvent } from "../shared/push.ts";
+import { FeedbackInput } from "../shared/feedback.ts";
 
 const runtime = ManagedRuntime.make(
   Chats.layer.pipe(Layer.provideMerge(ModelCatalog.layer)),
@@ -91,6 +92,22 @@ const route = Effect.fn("Http.route")(function* (
   pathname: string,
 ) {
   const chats = yield* Chats;
+
+  if (pathname === "/api/feedback" && request.method === "GET") {
+    json(response, 200, yield* chats.feedbackList());
+
+    return;
+  }
+
+  if (pathname === "/api/feedback" && request.method === "POST") {
+    yield* chats.feedback(
+      yield* Schema.decodeUnknownEffect(FeedbackInput)(yield* body(request)),
+      release,
+    );
+    json(response, 202, { id: 0 });
+
+    return;
+  }
 
   if (pathname === "/api/push" && request.method === "GET") {
     const publicKey = yield* Config.String("STILL_VAPID_PUBLIC_KEY").pipe(

@@ -61,6 +61,8 @@ import {
   unsubscribe,
 } from "../kernel/push.ts";
 import type { PushSubscription, PushEvent } from "../shared/push.ts";
+import type { FeedbackInput, FeedbackItem } from "../shared/feedback.ts";
+import { FeedbackDoc, recordFeedback } from "../kernel/feedback.ts";
 import { loadExtensions } from "../kernel/extensions.ts";
 import {
   ChatFailure,
@@ -203,6 +205,14 @@ export class Chats extends Context.Service<
     readonly notify: (
       input: PushEvent,
     ) => Effect.Effect<{ id: number }, ChatFailure>;
+    readonly feedback: (
+      input: FeedbackInput,
+      release: string,
+    ) => Effect.Effect<void, ChatFailure>;
+    readonly feedbackList: () => Effect.Effect<
+      readonly FeedbackItem[],
+      ChatFailure
+    >;
   }
 >()("still/Chats") {
   static readonly core = Layer.effect(
@@ -926,6 +936,32 @@ export class Chats extends Context.Service<
               context,
             ),
           })),
+        feedback: (input, release) =>
+          attempt(() =>
+            harness.commit(
+              (tx) =>
+                recordFeedback(tx, {
+                  id: input.requestId,
+                  text: input.text,
+                  conversationId: input.conversationId,
+                  context: input.context,
+                  release,
+                  createdAt: Date.now(),
+                }),
+              context,
+            ),
+          ),
+        feedbackList: () =>
+          attempt(() =>
+            harness.commit(
+              // Copy out of the transaction overlay before it settles.
+              async (tx) =>
+                (await tx.doc(FeedbackDoc)).items
+                  .map((item) => ({ ...item }))
+                  .reverse(),
+              context,
+            ),
+          ),
       });
     }),
   );

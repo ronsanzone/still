@@ -15,6 +15,7 @@ import {
   type ComposerProps,
 } from "../src/client/composer.tsx";
 import { DecisionCard } from "../src/client/views.tsx";
+import { parseFeedback } from "../src/shared/feedback.ts";
 
 function message(
   id: string,
@@ -341,6 +342,32 @@ describe("Composer", () => {
     expect(sendsOnEnter({ ...key, shiftKey: true }, true)).toBe(false);
     expect(sendsOnEnter({ ...key, metaKey: true }, false)).toBe(true);
     expect(sendsOnEnter({ ...key, key: "a" }, true)).toBe(false);
+  });
+});
+
+describe("/feedback", () => {
+  it("parses the command and leaves ordinary prompts alone", () => {
+    expect(parseFeedback("/feedback streaming felt janky")).toBe(
+      "streaming felt janky",
+    );
+    expect(parseFeedback("  /Feedback\nline one\nline two ")).toBe(
+      "line one\nline two",
+    );
+    expect(parseFeedback("/feedback")).toBe("");
+    expect(parseFeedback("/feedbacks")).toBeNull();
+    expect(parseFeedback("Give me /feedback on this")).toBeNull();
+  });
+
+  it("saves without a model and suggests the command while typing", () => {
+    const save = renderToStaticMarkup(
+      <Composer {...composer} model="" draft="/feedback chips are small" />,
+    );
+
+    const typing = renderToStaticMarkup(<Composer {...composer} draft="/fe" />);
+
+    expect(save).toMatch(/aria-label="Save feedback"(?![^>]*disabled)/);
+    expect(typing).toContain("Save a note about Still for dogfooding");
+    expect(save).not.toContain("Save a note about Still for dogfooding");
   });
 });
 

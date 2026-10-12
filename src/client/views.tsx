@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Effect, Schema } from "effect";
 import {
   Activity,
@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { Receipt, type ChatSummary, type Work } from "../shared/contracts.ts";
 import { PushSubscription } from "../shared/push.ts";
+import { FeedbackList, type FeedbackItem } from "../shared/feedback.ts";
 import { request } from "./api.ts";
 import { kits, shortModel } from "./format.ts";
 
@@ -124,6 +125,24 @@ export function WorkView({
 export function SettingsView({ active }: { readonly active: number | null }) {
   const [status, setStatus] = useState("");
 
+  const [feedback, setFeedback] = useState<readonly FeedbackItem[] | null>(
+    null,
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    Effect.runPromise(request("/api/feedback", FeedbackList), {
+      signal: controller.signal,
+    })
+      .then(setFeedback)
+      .catch(() => {
+        if (!controller.signal.aborted) setFeedback([]);
+      });
+
+    return () => controller.abort();
+  }, []);
+
   async function enable() {
     try {
       const config = await Effect.runPromise(
@@ -232,6 +251,30 @@ export function SettingsView({ active }: { readonly active: number | null }) {
           {status}
         </p>
       </div>
+      <h2>Feedback{feedback?.length ? ` · ${feedback.length}` : ""}</h2>
+      {feedback?.length ? (
+        <ul className="rows feedback-list">
+          {feedback.map((item) => (
+            <li key={item.id}>
+              <p>{item.text}</p>
+              <small>
+                <time dateTime={new Date(item.createdAt).toISOString()}>
+                  {new Date(item.createdAt).toLocaleString()}
+                </time>{" "}
+                · {item.context}
+              </small>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="empty-card">
+          <p>
+            {feedback === null
+              ? "Loading…"
+              : "Type /feedback and a note in any chat to log it here."}
+          </p>
+        </div>
+      )}
       <h2>About</h2>
       <div className="card">
         <dl>

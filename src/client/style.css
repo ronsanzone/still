@@ -1019,6 +1019,34 @@ details[open] > summary::after {
   padding: 2px 8px 0;
 }
 
+.slash-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: var(--r);
+  background: var(--sunken);
+  font-size: 14px;
+  text-align: left;
+}
+.slash-suggestion span {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.notice {
+  justify-self: center;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 500;
+  animation: rise var(--ease) both;
+}
+
 /* Pages: Chats, Work, Settings */
 .page {
   max-width: var(--column);
@@ -1083,6 +1111,17 @@ details[open] > summary::after {
   background: var(--paper);
   border: 1px solid var(--line);
   overflow: hidden;
+}
+.feedback-list li {
+  padding: 12px 16px;
+}
+.feedback-list p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.feedback-list small {
+  color: var(--muted);
+  font-size: 12px;
 }
 .rows li + li {
   border-top: 1px solid var(--line);

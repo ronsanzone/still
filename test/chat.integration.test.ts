@@ -192,6 +192,47 @@ describe("Chats with Durable SQLite", () => {
     ),
   );
 
+  it.effect("keeps owner feedback once per request and across restarts", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+
+        const note = {
+          text: "Streaming felt janky on the phone",
+          requestId: "feedback-0001",
+          conversationId: null,
+          context: "chat · chat · faux-1 · 390x844",
+        };
+
+        yield* Effect.gen(function* () {
+          const chats = yield* Chats;
+          yield* chats.feedback(note, "test-release");
+          yield* chats.feedback(note, "test-release");
+          yield* chats.feedback(
+            { ...note, text: "Second note", requestId: "feedback-0002" },
+            "test-release",
+          );
+        }).pipe(Effect.provide(testLayer(database, []).layer));
+
+        const items = yield* Effect.gen(function* () {
+          const chats = yield* Chats;
+
+          return yield* chats.feedbackList();
+        }).pipe(Effect.provide(testLayer(database, []).layer));
+
+        expect(items.map((item) => item.text)).toEqual([
+          "Second note",
+          "Streaming felt janky on the phone",
+        ]);
+        expect(items[1]).toMatchObject({
+          id: "feedback-0001",
+          context: note.context,
+          release: "test-release",
+        });
+      }),
+    ),
+  );
+
   it.effect("rejects provider models that are not offered", () =>
     Effect.scoped(
       Effect.gen(function* () {

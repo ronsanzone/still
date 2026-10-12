@@ -6,6 +6,7 @@ import {
   Globe,
   Image,
   MessageSquare,
+  MessageSquareText,
   ShieldAlert,
   Square,
   X,
@@ -13,6 +14,7 @@ import {
 import type { Grant, ModelChoice } from "../shared/contracts.ts";
 import type { AttachmentUpload } from "../shared/attachments.ts";
 import { AttachmentChooser } from "./attachments.tsx";
+import { parseFeedback } from "../shared/feedback.ts";
 import { formatCost, kits, shortModel } from "./format.ts";
 
 const kitIcons = { chat: MessageSquare, research: Globe, still: ShieldAlert };
@@ -69,13 +71,23 @@ export function Composer(props: ComposerProps) {
     node.style.height = `${Math.min(node.scrollHeight, 220)}px`;
   }, [props.draft]);
 
-  const action = props.pending
-    ? "Retry send"
-    : props.busy
-      ? props.whenBusy === "steer"
-        ? "Steer"
-        : "Queue"
-      : "Send";
+  const feedback = parseFeedback(props.draft) !== null;
+
+  // Offer the command while it is being typed.
+  const suggest =
+    props.draft.startsWith("/") &&
+    !feedback &&
+    "/feedback".startsWith(props.draft.trim().toLowerCase());
+
+  const action = feedback
+    ? "Save feedback"
+    : props.pending
+      ? "Retry send"
+      : props.busy
+        ? props.whenBusy === "steer"
+          ? "Steer"
+          : "Queue"
+        : "Send";
 
   return (
     <form
@@ -112,6 +124,17 @@ export function Composer(props: ComposerProps) {
         <p className="composer-note">
           Original attachments are kept in this branch.
         </p>
+      )}
+      {suggest && (
+        <button
+          type="button"
+          className="slash-suggestion"
+          onClick={() => props.onDraft("/feedback ")}
+        >
+          <MessageSquareText size={14} aria-hidden="true" />
+          <strong>/feedback</strong>
+          <span>Save a note about Still for dogfooding</span>
+        </button>
       )}
       <div className="field">
         <AttachmentChooser
@@ -159,7 +182,7 @@ export function Composer(props: ComposerProps) {
           title={action}
           disabled={
             !props.draft.trim() ||
-            !props.model ||
+            (!props.model && !feedback) ||
             props.sending ||
             props.preparing
           }

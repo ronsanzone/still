@@ -31,8 +31,9 @@ import {
 } from "../shared/contracts.ts";
 import { apiPath, request, RequestFailure } from "./api.ts";
 import type { AttachmentUpload } from "../shared/attachments.ts";
+import { parseFeedback } from "../shared/feedback.ts";
 import { Composer } from "./composer.tsx";
-import { kits } from "./format.ts";
+import { kits, shortModel } from "./format.ts";
 import { Timeline } from "./timeline.tsx";
 import { ChatList, DecisionCard, SettingsView, WorkView } from "./views.tsx";
 
@@ -193,6 +194,8 @@ export function App() {
   const [newKit, setNewKit] = useState<"chat" | "research">("chat");
   const scroll = useRef<HTMLDivElement>(null);
   const inFlight = useRef(false);
+  const feedbackId = useRef<string | null>(null);
+  const [notice, setNotice] = useState("");
   const wide = useWide();
   const page = wide && view === "chats" ? "chat" : view;
 
@@ -326,6 +329,12 @@ export function App() {
   useEffect(() => {
     localStorage.setItem(`still:v1:draft:${active ?? "new"}`, draft);
   }, [draft, active]);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(""), 3000);
+
+    return () => clearTimeout(timer);
+  }, [notice]);
 
   function selectChat(id: number | null) {
     if (preparing) return;
@@ -342,7 +351,51 @@ export function App() {
     }
   }
 
+  async function saveFeedback(note: string) {
+    if (!note) {
+      setError("Write your note after /feedback.");
+
+      return;
+    }
+
+    inFlight.current = true;
+    setSending(true);
+    setError("");
+    // Reused until saved, so a retry after a dropped connection never duplicates.
+    feedbackId.current ??= crypto.randomUUID();
+    const standalone = matchMedia("(display-mode: standalone)").matches;
+
+    await run(
+      request("/api/feedback", Receipt, {
+        text: note,
+        requestId: feedbackId.current,
+        conversationId: active,
+        context: [
+          page,
+          kit,
+          model ? shortModel(model) : "no model",
+          `${innerWidth}x${innerHeight}${standalone ? " standalone" : ""}`,
+        ].join(" · "),
+      }),
+      () => {
+        feedbackId.current = null;
+        setDraft("");
+        setNotice("Feedback saved");
+      },
+    );
+    inFlight.current = false;
+    setSending(false);
+  }
+
   async function send() {
+    const note = parseFeedback(draft);
+
+    if (note !== null && !inFlight.current) {
+      await saveFeedback(note);
+
+      return;
+    }
+
     if (inFlight.current || preparing || !draft.trim() || !model) return;
     inFlight.current = true;
     setSending(true);
@@ -669,6 +722,11 @@ export function App() {
                   }
                 />
               ))}
+              {notice && (
+                <p className="notice" role="status">
+                  {notice}
+                </p>
+              )}
               {error && (
                 <div className="error-banner" role="alert">
                   <p>{error}</p>
