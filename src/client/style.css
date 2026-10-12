@@ -436,6 +436,14 @@ details[open] > summary::after {
 .answer ol {
   padding-left: 22px;
 }
+.answer .contains-task-list {
+  padding-left: 4px;
+  list-style: none;
+}
+.answer .task-list-item input {
+  margin: 0 6px 0 0;
+  accent-color: var(--accent);
+}
 .answer li + li {
   margin-top: 4px;
 }
