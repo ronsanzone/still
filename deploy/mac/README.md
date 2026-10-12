@@ -1,76 +1,41 @@
-# Native Mac preparation — first implementation milestone
+# Running Still on the Mac mini
 
-This directory currently provides a **read-only preflight**, not an installer.
-The authoritative target is [spec v1.2](../../docs/rearchitecture-and-product-spec.md),
-especially sections 13–17. Phases 1–2 implement kit grants, chat controls,
-attachments, read-only research and push foundations; generic agents, report
-delivery and passkey release approval remain pending. See
-[push operator gates](../../docs/push-setup.md). Do not expose the retained
-token-based release supervisor.
+## Today
 
-## Safe commands now
-
-From a checkout with Node 26.10.0, substitute your actual macOS login:
+One Node process bound to `127.0.0.1:3000`, exposed only on the tailnet:
 
 ```sh
-node deploy/mac/preflight.mjs --owner YOUR_MAC_LOGIN --dry-run
+tailscale serve --bg --https=443 http://127.0.0.1:3000
 ```
 
-This prints a plan without inspecting host configuration or credentials. On the
-Mac, this next command performs read-only probes and exits 2 for missing setup:
+Start it from a checkout after `npm ci && npm run build`, with secrets passed in
+the environment by a private start script (never committed). The dogfood
+script also sets a production flag, a release label, the database, the workspace,
+a free-model allowlist and the provider and search keys:
 
 ```sh
-node deploy/mac/preflight.mjs --owner YOUR_MAC_LOGIN
+env -i HOME="$HOME" PATH="<node 26.10.0 bin>:/usr/bin:/bin" \
+  PORT=3000 STILL_PRODUCTION=1 STILL_RELEASE="dogfood-$(git rev-parse --short HEAD)" \
+  STILL_DATABASE="$PWD/.data/still-v1.sqlite" \
+  STILL_WORKSPACE="<workspace dir>" \
+  STILL_MODEL_ALLOWLIST="opencode-go/longcat-2.5-preview-free" \
+  OPENCODE_GO_API_KEY="…" BRAVE_SEARCH_API_KEY="…" \
+  node --import tsx src/server/main.ts
 ```
 
-The actual `_still` home-access probe requires root and otherwise reports an
-unverified check. After reviewing the script and installing the protected Node
-runtime, the operator can run:
+Keep keys out of shell history. For example, read them from the macOS Keychain
+(`security find-generic-password -s <item> -w`) inside the script.
 
-```sh
-sudo /usr/local/still-host/node/bin/node deploy/mac/preflight.mjs --owner YOUR_MAC_LOGIN
-```
+Check health with `curl https://<host>.<tailnet>.ts.net/healthz`.
 
-It does not create users, install software, start daemons, change Tailscale or
-read secret values. A green result is **not deployment approval**: it does not
-prove ACL configuration, daemon identity/configuration, login-shell restrictions,
-backup contents, reboot behavior, device notifications or passkey behavior.
-The Node ownership check uses POSIX metadata; inspect macOS ACLs separately.
+## Next
 
-## Operator gates — not executed by this work
+1. A launchd service so Still survives reboots and crashes. Until isolation
+   exists, a dedicated macOS account for Still limits what the agent can reach
+   on the Mac to that account's files.
+2. Scheduled SQLite backups using the online backup API (not a file copy) with
+   a restore drill.
+3. Isolation: run each workspace in its own lightweight VM and route tools
+   through Pi's `ExecutionEnv`. See [docs/spec.md](../../docs/spec.md#roadmap).
 
-1. Approve the exclusive `_still` system account and its own primary group, no
-   `staff` membership and no login shell. Choose an unused UID/GID below 500.
-   Review owner-home permissions/ACLs; mode 750 or stricter alone is not proof
-   that all owner files are inaccessible.
-2. Install the verified official Node 26.10.0 distribution under root-owned
-   `/usr/local/still-host/node`, not Homebrew. Keep its ancestors non-writable
-   by `_still`; prepare the state layout from spec section 13.2. Do not use a
-   root process to execute unreviewed package installation scripts.
-3. Phase 0 runs **only the plain app** as `_still`, listening on localhost:3000,
-   under `dev.still.app` launchd supervision. Builder stays disabled. Final
-   `dev.still.host` installation waits for the hardened approval implementation.
-   Deployment templates/installer and environment provisioning are still pending.
-4. Configure Tailscale HTTPS/Services and owner-device-only access according to
-   section 13.3; never enable Funnel. Confirm the forwarded identity-header
-   behavior instead of assuming ordinary localhost traffic is authenticated.
-   Preview and approval need their own origins in Phase 4.
-5. Enter provider/Brave/push credentials only through the private operator setup;
-   never commit them. This milestone makes no provider requests.
-6. Complete the reboot, backup/restore, tailnet-origin and real-iPhone checks in
-   sections 16–17. Before Phase 1, archive `phase0-final.sqlite` and deliberately
-   choose fresh state. Never overwrite the dogfood database as an implicit upgrade.
-
-## Verification and limits
-
-`npm run check` includes preflight CLI tests and live-process identity tests.
-The existing offline Builder exercise also tests Linux activation/recovery and
-orphan cleanup. It is a disposable-orb test, **not a Mac provisioning command**:
-it uses a test UID and must not be run on a shared host unchanged.
-
-The platform functions support Linux `/proc` and Darwin `ps`/`pkill`; only Linux
-has been executed in the development orb. Darwin process start times have
-second precision, so they are not an absolute PID-reuse guarantee. The exclusive
-account and cleanup remain required. App, coding shell, checks and preview share
-the app account's permissions: process cleanup and separate browser origins do
-not provide containment.
+Never enable Tailscale Funnel: the app has no login of its own.

@@ -1,8 +1,8 @@
-# Phase 2 push foundation
+# Web Push setup
 
 Settings exposes enable/disable notifications and a test event for the open conversation.
 The real transport is disabled until operator VAPID configuration is supplied.
-Automatic agent-batch/release notifications belong to the upcoming agent/release phases.
+Automatic notifications (for example when a subagent batch settles) arrive with the subagents phase.
 Push is a hint to fetch Pi's authoritative state, never a report store.
 
 ## Wiring
@@ -10,7 +10,7 @@ Push is a hint to fetch Pi's authoritative state, never a report store.
 - `src/server/services.ts` resolves `Notifier` from `webPushLayer(webPush)`; Chats installs `notificationExtension(notifier)` before opening the Harness, including recovery.
 - Decode unknown HTTP inputs with the exported `PushSubscription` / `PushEvent` schemas first. Within a Pi Session/conversation `commit`, await `Effect.runPromise(subscribe(tx, decodedInput, Date.now()))`, `unsubscribe(tx, endpoint)`, or `push.admit(tx, { eventId, conversationId })`. These promise bridges are framework boundaries; do not run effects after the transaction returns.
 - Admission returns a native task ID. Use `harness.waitForTask` to inspect terminal outcomes. Event IDs are session-wide immutable identities; conflicting conversation IDs are rejected. Allocate stable opaque IDs, not titles, prompts, user names or other content.
-- The app requires an authenticated single-owner proxy. Mutation routes require JSON and `X-Still-Client: 1` and reject cross-site requests; this CSRF boundary is not owner authentication. Subscription endpoints and keys are private capabilities; never return the session document publicly or log it. Native subscriptions support endpoint-key replacement and explicit revocation.
+- The app has no login; it relies on a loopback bind plus Tailscale. Mutation routes require JSON and `X-Still-Client: 1` and reject cross-site requests; this CSRF boundary is not owner authentication. Subscription endpoints and keys are private capabilities; never return the session document publicly or log it. Native subscriptions support endpoint-key replacement and explicit revocation.
 - The enable button registers `/sw.js` at root scope. Use HTTPS; on iPhone, install the app to the Home Screen first. Click navigation uses `/?chat=<numeric ID>`. Disable revokes the server subscription before unsubscribing locally. Expiry cleanup is manual.
 
 ## Private operator configuration (no account or privileged operations)
