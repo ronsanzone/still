@@ -77,12 +77,6 @@ export function urlKey(value: string) {
   return `${host}${port}${path}${url.search}`;
 }
 
-export class ConfirmationRequired extends Error {
-  constructor(readonly url: string) {
-    super("URL requires explicit confirmation");
-  }
-}
-
 // Injectable network functions are test boundaries, never URL-controlled policy switches.
 export const network = {
   resolve: (host: string) => lookup(host, { all: true, verbatim: true }),
@@ -93,7 +87,6 @@ export const network = {
 
 export async function readUrl(
   value: string,
-  allowed: (url: string) => boolean,
   signal?: AbortSignal,
   transport = network,
   headers: Record<string, string> = {},
@@ -118,8 +111,6 @@ export async function readUrl(
     );
 
     try {
-      if (!allowed(url.href)) throw new ConfirmationRequired(url.href);
-
       const addresses = await Promise.race([
         isIP(host)
           ? Promise.resolve([{ address: host, family: isIP(host) }])
@@ -191,8 +182,6 @@ export async function readUrl(
         if (!response.location) throw new Error("Redirect without location");
         const next = webUrl(new URL(response.location, url).href);
 
-        // Confirmation is exact-URL, never a wildcard origin grant, including redirects.
-        if (!allowed(next.href)) throw new ConfirmationRequired(next.href);
         url = next;
         // Do not leak any credential header on redirects, including within the search adapter.
         headers = {};

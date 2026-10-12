@@ -1,22 +1,11 @@
 import { useEffect, useState } from "react";
 import { Effect, Schema } from "effect";
-import {
-  Activity,
-  Bell,
-  BellOff,
-  Globe,
-  MessageSquare,
-  Plus,
-  Send,
-  ShieldAlert,
-} from "lucide-react";
+import { Activity, Bell, BellOff, Plus, Send } from "lucide-react";
 import { Receipt, type ChatSummary, type Work } from "../shared/contracts.ts";
 import { PushSubscription } from "../shared/push.ts";
 import { FeedbackList, type FeedbackItem } from "../shared/feedback.ts";
 import { request } from "./api.ts";
-import { kits, shortModel } from "./format.ts";
-
-const kitIcons = { chat: MessageSquare, research: Globe, still: ShieldAlert };
+import { shortModel } from "./format.ts";
 
 export function ChatList({
   chats,
@@ -43,26 +32,19 @@ export function ChatList({
         <p className="empty">No chats yet. Ask something to start one.</p>
       ) : (
         <ul aria-label="Chats">
-          {chats.map((chat) => {
-            const Icon = kitIcons[chat.grant.kit];
-
-            return (
-              <li key={chat.id}>
-                <button
-                  type="button"
-                  aria-current={active === chat.id ? "page" : undefined}
-                  disabled={disabled}
-                  onClick={() => onSelect(chat.id)}
-                >
-                  <span className="chat-title">{chat.title}</span>
-                  <span className={`chat-meta kit-${chat.grant.kit}`}>
-                    <Icon size={12} aria-hidden="true" />
-                    {kits[chat.grant.kit].label} · {shortModel(chat.model)}
-                  </span>
-                </button>
-              </li>
-            );
-          })}
+          {chats.map((chat) => (
+            <li key={chat.id}>
+              <button
+                type="button"
+                aria-current={active === chat.id ? "page" : undefined}
+                disabled={disabled}
+                onClick={() => onSelect(chat.id)}
+              >
+                <span className="chat-title">{chat.title}</span>
+                <span className="chat-meta">{shortModel(chat.model)}</span>
+              </button>
+            </li>
+          ))}
         </ul>
       )}
     </div>
@@ -285,42 +267,6 @@ export function SettingsView({ active }: { readonly active: number | null }) {
           <dt>Appearance</dt>
           <dd>Follows the system light or dark setting.</dd>
         </dl>
-      </div>
-    </section>
-  );
-}
-
-export function DecisionCard({
-  url,
-  onDecide,
-}: {
-  readonly url: string;
-  readonly onDecide: (allow: boolean) => void;
-}) {
-  return (
-    <section className="decision" aria-label="Decision needed">
-      <p className="decision-title">
-        <Globe size={16} aria-hidden="true" /> Allow Still to read this URL?
-      </p>
-      <code>{url}</code>
-      <p className="decision-hint">
-        Applies to this exact URL only, not the site. Then send Continue.
-      </p>
-      <div className="button-row">
-        <button
-          type="button"
-          className="button primary"
-          onClick={() => onDecide(true)}
-        >
-          Allow this URL
-        </button>
-        <button
-          type="button"
-          className="button"
-          onClick={() => onDecide(false)}
-        >
-          Deny
-        </button>
       </div>
     </section>
   );

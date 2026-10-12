@@ -48,13 +48,9 @@ export class SearchProvider extends Context.Service<
 
           const response = yield* Effect.tryPromise({
             try: (signal) =>
-              readUrl(
-                url.href,
-                (value) => value === url.href,
-                signal,
-                undefined,
-                { "X-Subscription-Token": Redacted.value(key.value) },
-              ),
+              readUrl(url.href, signal, undefined, {
+                "X-Subscription-Token": Redacted.value(key.value),
+              }),
             catch: () =>
               new SearchFailure({ message: "Search request failed" }),
           });

@@ -324,7 +324,6 @@ describe("Chats with Durable SQLite", () => {
                 id: persisted.created.id,
                 title: "Remember this after reopening",
                 model: modelId,
-                grant: { kit: "chat", target: null },
               },
             ]);
 
@@ -350,7 +349,6 @@ describe("shared chat contracts", () => {
           id: 1,
           title: "A chat",
           model: modelId,
-          grant: { kit: "chat", target: null },
           messages: [],
           busy: false,
           queued: 0,

@@ -7,7 +7,6 @@ import {
   readUrl,
   webUrl,
   urlKey,
-  ConfirmationRequired,
 } from "../src/kernel/fetch.ts";
 
 it("treats scheme, www., default port, trailing slash and fragment variants as one page", () => {
@@ -66,13 +65,13 @@ it("rejects private, metadata, tailnet, reserved and mapped addresses including 
   expect(publicAddress("2606:4700:4700::1111")).toBe(true);
   expect(network.idleMs).toBe(60000);
   await expect(
-    readUrl("http://private.test", () => true, undefined, {
+    readUrl("http://private.test", undefined, {
       ...network,
       resolve: async () => [{ address: "10.0.0.1", family: 4 }],
     }),
   ).rejects.toThrow("DNS answer blocked");
   await expect(
-    readUrl("http://mixed.test", () => true, undefined, {
+    readUrl("http://mixed.test", undefined, {
       ...network,
       resolve: async () => [
         { address: "8.8.8.8", family: 4 },
@@ -81,7 +80,7 @@ it("rejects private, metadata, tailnet, reserved and mapped addresses including 
     }),
   ).rejects.toThrow("DNS answer blocked");
   await expect(
-    readUrl("http://hung-dns.test", () => true, undefined, {
+    readUrl("http://hung-dns.test", undefined, {
       ...network,
       idleMs: 20,
       resolve: () => new Promise(() => {}),
@@ -90,7 +89,7 @@ it("rejects private, metadata, tailnet, reserved and mapped addresses including 
   const cancelled = new AbortController();
   cancelled.abort();
   await expect(
-    readUrl("http://cancelled.test", () => true, cancelled.signal, {
+    readUrl("http://cancelled.test", cancelled.signal, {
       ...network,
       resolve: () => new Promise(() => {}),
     }),
@@ -164,7 +163,6 @@ it("pins checked DNS, rechecks redirects, refuses unknown URLs and closes hung c
   try {
     const result = await readUrl(
       "http://public.test/answer",
-      () => true,
       undefined,
       transport,
     );
@@ -172,54 +170,30 @@ it("pins checked DNS, rechecks redirects, refuses unknown URLs and closes hung c
     expect(result.bytes.toString()).toBe("complete public answer");
     expect(resolutions).toBe(1);
     expect(pins).toEqual(["93.184.216.34"]);
-    const before = seen.length;
     await expect(
-      readUrl(
-        "http://public.test/composed?secret=abc",
-        () => false,
-        undefined,
-        transport,
-      ),
-    ).rejects.toBeInstanceOf(ConfirmationRequired);
-    expect(seen.length).toBe(before);
-    await expect(
-      readUrl("http://public.test/private", () => true, undefined, transport),
+      readUrl("http://public.test/private", undefined, transport),
     ).rejects.toThrow("address blocked");
     expect(seen).not.toContain("/secret");
-    await expect(
-      readUrl(
-        "http://public.test/cross",
-        (url) => url === "http://public.test/cross",
-        undefined,
-        transport,
-      ),
-    ).rejects.toMatchObject({ url: "http://other.test/answer" });
 
     const redirect = await readUrl(
       "http://public.test/redirect",
-      () => true,
       undefined,
       transport,
     );
 
     expect(redirect.url).toBe("http://public.test/answer");
     await expect(
-      readUrl("http://public.test/loop", () => true, undefined, transport),
+      readUrl("http://public.test/loop", undefined, transport),
     ).rejects.toThrow("loop");
     await expect(
-      readUrl("http://public.test/hung", () => true, undefined, transport),
+      readUrl("http://public.test/hung", undefined, transport),
     ).rejects.toThrow();
     await expect(
-      readUrl(
-        "http://public.test/no-headers",
-        () => true,
-        undefined,
-        transport,
-      ),
+      readUrl("http://public.test/no-headers", undefined, transport),
     ).rejects.toThrow();
     let rebinding = 0;
     await expect(
-      readUrl("http://public.test/redirect", () => true, undefined, {
+      readUrl("http://public.test/redirect", undefined, {
         ...transport,
         resolve: async () => [
           {

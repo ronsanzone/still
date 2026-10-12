@@ -232,19 +232,6 @@ code {
   color: var(--accent);
   font-weight: 500;
 }
-.kit-research {
-  --kit: var(--web);
-  --kit-bg: var(--web-bg);
-}
-.kit-still {
-  --kit: var(--warn);
-  --kit-bg: var(--warn-bg);
-}
-.subtitle.kit-research svg,
-.subtitle.kit-still,
-.subtitle.kit-still svg {
-  color: var(--kit);
-}
 
 /* Empty state */
 .welcome {
@@ -263,30 +250,7 @@ code {
   margin-top: 8px;
   color: var(--muted);
 }
-.kit-guide {
-  list-style: none;
-  margin: 24px 0 0;
-  padding: 0;
-  border-top: 1px solid var(--line);
-}
-.kit-guide li {
-  display: grid;
-  grid-template-columns: 20px auto 1fr;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--line);
-  font-size: 15px;
-}
-.kit-guide span {
-  color: var(--muted);
-  text-align: right;
-}
-.kit-guide .kit-research svg,
-.kit-guide .kit-still svg,
-.kit-guide .kit-still span {
-  color: var(--kit);
-}
+
 .welcome .hint {
   margin-top: 16px;
   font-size: 14px;
@@ -362,9 +326,7 @@ code {
   min-height: 32px;
   border-radius: var(--r-sm);
 }
-summary::-webkit-details-marker {
-  display: none;
-}
+
 .attached-text summary::after,
 .thinking summary::after,
 .work-summary summary::after {
@@ -743,7 +705,7 @@ details[open] > summary::after {
   flex-shrink: 0;
 }
 
-/* Dock: decisions, errors and the composer */
+/* Dock: notices, errors and the composer */
 .dock {
   padding: 0 var(--gutter) calc(var(--bottom) + 8px);
   display: grid;
@@ -752,31 +714,7 @@ details[open] > summary::after {
   max-width: calc(var(--column) + 2 * var(--gutter));
   margin: 0 auto;
 }
-.decision {
-  padding: 14px;
-  border-radius: var(--r);
-  background: var(--warn-bg);
-  border: 1px solid var(--warn-line);
-  box-shadow: var(--shadow);
-  animation: rise var(--ease) both;
-}
-.decision-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  color: var(--warn);
-}
-.decision code {
-  display: block;
-  margin: 8px 0 4px;
-  overflow-wrap: anywhere;
-  font-size: 13px;
-}
-.decision-hint {
-  font-size: 13px;
-  color: var(--muted);
-}
+
 .button-row {
   display: flex;
   flex-wrap: wrap;
@@ -941,11 +879,7 @@ details[open] > summary::after {
   background: var(--accent-soft);
   color: var(--accent);
 }
-.chip.kit-research,
-.chip.kit-still {
-  background: var(--kit-bg);
-  color: var(--kit);
-}
+
 .cost {
   margin-left: auto;
   font-size: 12px;
@@ -1220,10 +1154,7 @@ details[open] > summary::after {
   overflow: hidden;
   white-space: nowrap;
 }
-.chat-meta.kit-research svg,
-.chat-meta.kit-still {
-  color: var(--kit);
-}
+
 .new-chat {
   display: inline-flex;
   align-items: center;

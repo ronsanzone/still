@@ -1,10 +1,8 @@
 import { Effect, Schema } from "effect";
-import type { FetchDecision } from "../shared/research.ts";
 import type { PushSubscription, PushEvent } from "../shared/push.ts";
 import type { FeedbackInput } from "../shared/feedback.ts";
 import {
   ApiProblem,
-  type Grant,
   type Branch,
   type SendMessage,
 } from "../shared/contracts.ts";
@@ -22,9 +20,7 @@ export const request = Effect.fn("Api.request")(function* <A>(
   schema: Schema.Codec<A>,
   payload?:
     | SendMessage
-    | Grant
     | Branch
-    | FetchDecision
     | PushSubscription
     | PushEvent
     | FeedbackInput

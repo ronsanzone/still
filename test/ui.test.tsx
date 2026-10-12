@@ -14,7 +14,6 @@ import {
   sendsOnEnter,
   type ComposerProps,
 } from "../src/client/composer.tsx";
-import { DecisionCard } from "../src/client/views.tsx";
 import { parseFeedback } from "../src/shared/feedback.ts";
 
 function message(
@@ -42,13 +41,11 @@ function snapshot(extra: Partial<ChatSnapshot> = {}): ChatSnapshot {
     id: 7,
     title: "Durable writes",
     model: "faux/faux-1",
-    grant: { kit: "research", target: null },
     messages: [],
     busy: false,
     queued: 0,
     attachments: [],
     citations: [],
-    confirmations: [],
     cost: 0,
     changes: [],
     tools: [],
@@ -66,7 +63,7 @@ const answer = message("7-0", "assistant", 7, "Yes [1].", {
 
 const research = snapshot({
   messages: [ask, toolCall, answer],
-  changes: [{ id: 1, text: "Kit: research" }],
+  changes: [{ id: 1, text: "Model: opencode-go/longcat-2.5-preview-free" }],
   tools: [
     { id: "5", name: "web_search", text: "3 results", failed: false },
     { id: "5", name: "web_fetch", text: "Fetched", failed: false },
@@ -97,24 +94,6 @@ describe("timeline", () => {
     expect(items[2]?.kind === "work" && items[2].tools.length).toBe(3);
   });
 
-  it("drops kit resets that change nothing, as forks record", () => {
-    const items = timeline(
-      snapshot({
-        changes: [
-          { id: 1, text: "Kit: chat" },
-          { id: 2, text: "Kit: research" },
-          { id: 3, text: "Kit: research" },
-          { id: 4, text: "Kit: chat" },
-        ],
-      }),
-    );
-
-    expect(items.map((item) => item.kind === "change" && item.text)).toEqual([
-      "Switched to Research kit",
-      "Switched to Chat kit",
-    ]);
-  });
-
   it("keeps the live message last and hides tool-call-only assistant entries", () => {
     const live = message("live", "assistant", null, "Streaming");
     const items = timeline(snapshot({ messages: [live, ask, toolCall] }));
@@ -131,7 +110,6 @@ describe("timeline", () => {
       summary: "Searched 1 time · read 2 pages",
       failed: 1,
     });
-    expect(describeChange("Kit: research")).toBe("Switched to Research kit");
     expect(describeChange("Model: opencode-go/space-bunny-free")).toBe(
       "Model set to space-bunny-free",
     );
@@ -285,7 +263,7 @@ describe("Timeline rendering", () => {
 
     expect(group).toContain("Is example.com safe to cite?");
     expect(group).toContain("Yes [1].");
-    expect(html.indexOf("Switched to Research kit")).toBeLessThan(
+    expect(html.indexOf("Model set to longcat-2.5-preview-free")).toBeLessThan(
       html.indexOf('class="current-turn"'),
     );
   });
@@ -304,9 +282,6 @@ const composer: ComposerProps = {
   models: [{ id: "faux/faux-1", name: "Scripted faux", provider: "faux" }],
   model: "faux/faux-1",
   onModel: noop,
-  kit: "chat",
-  onKit: noop,
-  canChooseStill: false,
   cost: 0.00042,
   busy: false,
   queued: 0,
@@ -326,15 +301,14 @@ const composer: ComposerProps = {
 };
 
 describe("Composer", () => {
-  it("is a plain send with model, kit and cost chips when idle", () => {
+  it("is a plain send with model and cost chips when idle", () => {
     const html = renderToStaticMarkup(<Composer {...composer} />);
 
     expect(html).toContain('aria-label="Send"');
     expect(html).not.toContain("Stop answer");
     expect(html).toContain('aria-label="Model"');
-    expect(html).toContain('aria-label="Kit"');
+    expect(html).not.toContain('aria-label="Kit"');
     expect(html).toContain("$0.0004");
-    expect(html).toMatch(/<option value="still" disabled="">/);
   });
 
   it("turns Send into Queue or Steer with Stop while busy", () => {
@@ -351,9 +325,8 @@ describe("Composer", () => {
     expect(queue).toContain("1 queued");
     expect(steer).toContain('aria-label="Steer"');
     expect(steer).toMatch(/aria-checked="true"[^>]*>Steer/);
-    // Locked model and kit give way to Queue/Steer so the composer keeps its height.
+    // The locked model gives way to Queue/Steer so the composer keeps its height.
     expect(queue).not.toContain('aria-label="Model"');
-    expect(queue).not.toContain('aria-label="Kit"');
   });
 
   it("labels a saved unsent input as a retry", () => {
@@ -401,22 +374,5 @@ describe("/feedback", () => {
     expect(save).toMatch(/aria-label="Save feedback"(?![^>]*disabled)/);
     expect(typing).toContain("Save a note about Still for dogfooding");
     expect(save).not.toContain("Save a note about Still for dogfooding");
-  });
-});
-
-describe("DecisionCard", () => {
-  it("names the exact URL and offers allow or deny", () => {
-    const html = renderToStaticMarkup(
-      <DecisionCard
-        url="https://www.rfc-editor.org/rfc/rfc2606"
-        onDecide={noop}
-      />,
-    );
-
-    expect(html).toContain(
-      "<code>https://www.rfc-editor.org/rfc/rfc2606</code>",
-    );
-    expect(html).toContain("Allow this URL");
-    expect(html).toContain("Deny");
   });
 });

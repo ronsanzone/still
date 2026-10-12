@@ -33,7 +33,7 @@ export type TimelineItem =
   | { readonly kind: "change"; readonly key: string; readonly text: string };
 
 /**
- * Interleaves messages, tool results and kit/model changes by Pi entry id so
+ * Interleaves messages, tool results and model changes by Pi entry id so
  * work appears beside the turn that produced it. The live message has no
  * entry yet and always sorts last.
  */
@@ -60,7 +60,7 @@ export function timeline(snapshot: ChatSnapshot): readonly TimelineItem[] {
         tools: [tool],
       } as const,
     })),
-    ...effectiveChanges(snapshot.changes).map((change) => ({
+    ...snapshot.changes.map((change) => ({
       at: change.id,
       item: {
         kind: "change",
@@ -86,37 +86,13 @@ export function timeline(snapshot: ChatSnapshot): readonly TimelineItem[] {
   return items;
 }
 
-/**
- * Forks and new chats record a reset to Chat; showing it again when nothing
- * changed is noise. Keeps only changes that differ from the value in force.
- */
-function effectiveChanges(changes: ChatSnapshot["changes"]) {
-  const current = new Map([["Kit", "chat"]]);
-
-  return changes.filter((change) => {
-    const [field = "", ...rest] = change.text.split(": ");
-    const value = rest.join(": ");
-
-    if (current.get(field) === value) return false;
-    current.set(field, value);
-
-    return true;
-  });
-}
-
 export function describeChange(text: string) {
   const [field, ...rest] = text.split(": ");
   const value = rest.join(": ");
 
-  if (field === "Kit") return `Switched to ${kitLabel(value)} kit`;
-
   if (field === "Model") return `Model set to ${shortModel(value)}`;
 
   return text;
-}
-
-function kitLabel(kit: string) {
-  return kit.charAt(0).toUpperCase() + kit.slice(1);
 }
 
 const toolVerbs = new Map<string, readonly [string, string]>([

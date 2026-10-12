@@ -9,15 +9,6 @@ export const Prompt = Schema.String.check(
   Schema.isMaxLength(16000),
 );
 
-export const Kit = Schema.Literals(["chat", "research", "still"]);
-
-export const Grant = Schema.Struct({
-  kit: Kit,
-  target: Schema.NullOr(Schema.String),
-});
-
-export interface Grant extends Schema.Schema.Type<typeof Grant> {}
-
 export const ModelChoice = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
@@ -71,7 +62,6 @@ export const ChatSummary = Schema.Struct({
   id: ChatId,
   title: Schema.String,
   model: Schema.String,
-  grant: Grant,
 });
 
 export interface ChatSummary extends Schema.Schema.Type<typeof ChatSummary> {}
@@ -83,7 +73,6 @@ export const ChatSnapshot = Schema.Struct({
   queued: Schema.Number,
   attachments: Schema.Array(AttachmentMetadata),
   citations: Schema.Array(Citation),
-  confirmations: Schema.Array(Schema.String),
   cost: Schema.Number,
   parent: Schema.optionalKey(ChatId),
   changes: Schema.Array(Schema.Struct({ id: ChatId, text: Schema.String })),

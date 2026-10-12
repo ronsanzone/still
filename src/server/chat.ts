@@ -1,5 +1,5 @@
 import { mkdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
   Config,
   Context,
@@ -33,7 +33,6 @@ import type {
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import {
   ChatId,
-  Grant,
   type Branch,
   type ChatSnapshot,
   type ChatSummary,
@@ -45,14 +44,7 @@ import { ModelCatalog } from "./models.ts";
 import { ChatServices } from "./services.ts";
 import { Attachments, AttachmentEntry } from "../kernel/attachments.ts";
 import { SearchProvider } from "../kernel/search.ts";
-import {
-  FetchConfirm,
-  researchExtension,
-  researchDetails,
-  citations,
-} from "../kernel/research.ts";
-import { webUrl } from "../kernel/fetch.ts";
-import type { FetchDecision } from "../shared/research.ts";
+import { researchExtension, citations } from "../kernel/research.ts";
 import {
   Notifier,
   notificationExtension,
@@ -66,17 +58,14 @@ import { loadExtensions } from "../kernel/extensions.ts";
 import {
   ChatFailure,
   ChatDoc,
-  GrantDoc,
-  KitChange,
+  ChatStart,
   ModelChange,
-  Kernel,
-  environment,
+  agentExtension,
   idle,
-  selectKit,
-  initializeConversation,
-} from "../kernel/kits.ts";
+  workspaceEnv,
+} from "../kernel/agent.ts";
 
-export { ChatFailure } from "../kernel/kits.ts";
+export { ChatFailure } from "../kernel/agent.ts";
 
 const attempt = <A>(operation: () => Promise<A>) =>
   Effect.tryPromise({
@@ -156,11 +145,6 @@ export class Chats extends Context.Service<
   {
     readonly list: () => Effect.Effect<readonly ChatSummary[], ChatFailure>;
     readonly create: (model: string) => Effect.Effect<ChatSummary, ChatFailure>;
-    readonly kit: (
-      id: number,
-      grant: Grant,
-      supervisor?: boolean,
-    ) => Effect.Effect<{ id: number }, ChatFailure | Schema.SchemaError>;
     readonly branch: (
       id: number,
       input: Branch,
@@ -180,10 +164,6 @@ export class Chats extends Context.Service<
       ChatFailure
     >;
     readonly extensions: readonly string[];
-    readonly confirm: (
-      id: number,
-      input: FetchDecision,
-    ) => Effect.Effect<{ id: number }, ChatFailure | Schema.SchemaError>;
     readonly pdf: (
       id: number,
       hash: string,
@@ -219,14 +199,18 @@ export class Chats extends Context.Service<
         Config.withDefault(".data/still-v1.sqlite"),
       );
 
-      const root = yield* Config.String("STILL_BUILDER_ROOT").pipe(
-        Config.withDefault(""),
+      // Where the agent's tools run. Isolation comes later; today this is a host directory.
+      const workspace = resolve(
+        yield* Config.String("STILL_WORKSPACE").pipe(
+          Config.withDefault(join(dirname(path), "workspace")),
+        ),
       );
 
       const admission = yield* Semaphore.make(1);
       yield* attempt(() => mkdir(dirname(path), { recursive: true }));
+      yield* attempt(() => mkdir(workspace, { recursive: true }));
       const registry = createRegistry();
-      registry.install(Kernel);
+      registry.install(agentExtension(workspace));
       registry.install(research);
       registry.install(push.extension);
 
@@ -243,9 +227,8 @@ export class Chats extends Context.Service<
             {
               models: catalog.runtime,
               registry,
-              settings: { extensions: [] },
-              env: (target, frame) => environment(root, target, frame),
-              conversationCreated: initializeConversation,
+              // No stored selection: every conversation, fork and child gets all installed extensions.
+              env: workspaceEnv(workspace),
             },
             context,
           ).catch(async (error) => {
@@ -253,32 +236,7 @@ export class Chats extends Context.Service<
             throw error;
           });
 
-          try {
-            await opened.commit(async (tx) => {
-              let page = await tx.scanConversations({}, 100);
-
-              while (true) {
-                for (const record of page.items) {
-                  const meta = await tx.doc(ChatDoc, record.id);
-
-                  if ("model" in meta)
-                    throw new ChatFailure({
-                      message:
-                        "Pre-v1 database refused. Archive it and select a fresh STILL_DATABASE; no migration is performed.",
-                      status: 503,
-                    });
-                }
-
-                if (!page.next) break;
-                page = await tx.scanConversations({}, 100, page.next);
-              }
-            }, context);
-
-            return opened;
-          } catch (error) {
-            await opened.close(context);
-            throw error;
-          }
+          return opened;
         }),
         (value) => Effect.promise(() => value.close(context)),
       );
@@ -322,7 +280,6 @@ export class Chats extends Context.Service<
       async function summary(tx: Tx, id: ConversationId): Promise<ChatSummary> {
         const meta = await tx.doc(ChatDoc, id);
         const agent = await tx.doc(AgentDoc, id);
-        const grant = await tx.doc(GrantDoc, id);
 
         return {
           id,
@@ -330,7 +287,6 @@ export class Chats extends Context.Service<
           model: agent.model
             ? `${agent.model.provider}/${agent.model.modelId}`
             : "",
-          grant: { kit: grant.kit, target: grant.target },
         };
       }
 
@@ -366,44 +322,11 @@ export class Chats extends Context.Service<
               model: selected,
               thinkingLevel: "low",
             });
-            await tx.appendEntry(KitChange, created.id, {
-              data: { from: "chat", to: "chat", target: null },
-            });
+            await tx.appendEntry(ChatStart, created.id, { data: { model } });
 
             return summary(tx, created.id);
           }, context),
         );
-      });
-
-      const kit = Effect.fn("Chat.kit")(function* (
-        id: number,
-        input: Grant,
-        supervisor = false,
-      ) {
-        const valid = yield* Schema.decodeUnknownEffect(Grant)(input);
-
-        if (valid.kit === "still" && !supervisor)
-          return yield* new ChatFailure({
-            message:
-              "Still requires a supervisor-created candidate; owner release controls are not yet available in this client.",
-            status: 403,
-          });
-        const handle = yield* conversation(id);
-        yield* attempt(() =>
-          handle.commit(async (tx) => {
-            await idle(tx, handle.id);
-            const grant = await tx.doc(GrantDoc, handle.id);
-            const from = grant.kit;
-            await selectKit(tx, handle.id, valid, root, research);
-            grant.kit = valid.kit;
-            grant.target = valid.target;
-            await tx.appendEntry(KitChange, handle.id, {
-              data: { from, to: valid.kit, target: valid.target },
-            });
-          }, context),
-        );
-
-        return { id };
       });
 
       const send = Effect.fn("Chat.send")(function* (
@@ -426,9 +349,6 @@ export class Chats extends Context.Service<
               ? `${agent.model.provider}/${agent.model.modelId}`
               : "";
 
-            const live = await tx.doc(LiveDoc, handle.id);
-            const inbox = await tx.doc(InboxDoc, handle.id);
-
             if (input.attachments?.length) await idle(tx, handle.id);
 
             if (input.model && input.model !== current) {
@@ -440,14 +360,6 @@ export class Chats extends Context.Service<
               });
             }
 
-            if (!live.run && !inbox.items.length)
-              await selectKit(
-                tx,
-                handle.id,
-                await tx.doc(GrantDoc, handle.id),
-                root,
-                research,
-              );
             const meta = await tx.doc(ChatDoc, handle.id);
 
             if (meta.title === "New conversation")
@@ -606,11 +518,7 @@ export class Chats extends Context.Service<
               { ownership: { kind: "ownerless" } },
             );
 
-            await selectKit(tx, record.id, { kit: "chat", target: null }, root);
             await configure(tx, record.id, { model: selected });
-            await tx.appendEntry(KitChange, record.id, {
-              data: { from: "chat", to: "chat", target: null },
-            });
 
             return { id: record.id };
           }, context),
@@ -656,7 +564,6 @@ export class Chats extends Context.Service<
               id,
               title: state.title,
               model: state.model,
-              grant: state.grant,
               messages,
               busy: state.live.run !== undefined,
               queued: state.inbox.items.length,
@@ -664,28 +571,14 @@ export class Chats extends Context.Service<
                 AttachmentEntry.is(entry) ? entry.data.files : [],
               ),
               citations: citations(view.entries),
-              confirmations: [
-                ...new Set(
-                  researchDetails(view.entries).flatMap((item) =>
-                    item.confirmation ? [item.confirmation] : [],
-                  ),
-                ),
-              ].filter(
-                (url) =>
-                  !view.entries.some(
-                    (entry) => FetchConfirm.is(entry) && entry.data.url === url,
-                  ),
-              ),
               cost: [
                 ...Object.values(state.usage.models),
                 ...Object.values(state.usage.tools),
               ].reduce((sum, usage) => sum + usage.cost.total, 0),
               changes: view.entries.flatMap((entry) =>
-                KitChange.is(entry)
-                  ? [{ id: entry.id, text: `Kit: ${entry.data.to}` }]
-                  : ModelChange.is(entry)
-                    ? [{ id: entry.id, text: `Model: ${entry.data.to}` }]
-                    : [],
+                ModelChange.is(entry)
+                  ? [{ id: entry.id, text: `Model: ${entry.data.to}` }]
+                  : [],
               ),
               tools: view.entries.flatMap((entry) =>
                 (entry.model ?? []).flatMap((item) =>
@@ -733,10 +626,7 @@ export class Chats extends Context.Service<
                         (change) =>
                           change.type === "document" &&
                           change.conversationId === handle.id &&
-                          [
-                            GrantDoc.definition.kind,
-                            ChatDoc.definition.kind,
-                          ].includes(change.record.kind),
+                          change.record.kind === ChatDoc.definition.kind,
                       )
                     )
                       Queue.offerUnsafe(queue, observer.value);
@@ -768,30 +658,6 @@ export class Chats extends Context.Service<
             await watch.stop();
           }
         });
-      });
-
-      const confirm = Effect.fn("Chat.confirmFetch")(function* (
-        id: number,
-        input: FetchDecision,
-      ) {
-        const handle = yield* conversation(id);
-        const url = yield* attempt(async () => webUrl(input.url).href);
-
-        const result = yield* attempt(() =>
-          handle.submit(
-            {
-              type: "write",
-              requestId: input.requestId,
-              entry: {
-                kind: FetchConfirm.kind,
-                data: { url, allow: input.allow },
-              },
-            },
-            context,
-          ),
-        );
-
-        return { id: result.id };
       });
 
       const pdf = Effect.fn("Chat.pdf")(function* (id: number, hash: string) {
@@ -828,15 +694,11 @@ export class Chats extends Context.Service<
         list,
         create,
         extensions: extensions.map((item) => item.name),
-        kit: (id, input, supervisor) =>
-          kit(id, input, supervisor).pipe(admission.withPermits(1)),
         send: (id, input) => send(id, input).pipe(admission.withPermits(1)),
         branch: (id, input) => branch(id, input).pipe(admission.withPermits(1)),
         stop,
         watch,
         work,
-        confirm: (id, input) =>
-          confirm(id, input).pipe(admission.withPermits(1)),
         pdf,
         subscribe: (input) =>
           attempt(() =>

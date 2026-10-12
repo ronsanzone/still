@@ -10,10 +10,8 @@ import {
 import {
   Activity,
   ChevronLeft,
-  Globe,
   MessageSquare,
   Settings,
-  ShieldAlert,
   SquarePen,
   X,
 } from "lucide-react";
@@ -25,7 +23,6 @@ import {
   Receipt,
   SendMessage,
   Work,
-  type Grant,
   type Message,
   type ModelChoice,
 } from "../shared/contracts.ts";
@@ -33,9 +30,9 @@ import { request, RequestFailure } from "./api.ts";
 import type { AttachmentUpload } from "../shared/attachments.ts";
 import { parseFeedback } from "../shared/feedback.ts";
 import { Composer } from "./composer.tsx";
-import { kits, shortModel } from "./format.ts";
+import { shortModel } from "./format.ts";
 import { Timeline } from "./timeline.tsx";
-import { ChatList, DecisionCard, SettingsView, WorkView } from "./views.tsx";
+import { ChatList, SettingsView, WorkView } from "./views.tsx";
 
 type View = "chat" | "chats" | "work" | "settings";
 
@@ -167,8 +164,6 @@ function useTurnScroll(
   }, [scroll, page]);
 }
 
-const kitIcons = { chat: MessageSquare, research: Globe, still: ShieldAlert };
-
 export function App() {
   const [models, setModels] = useState<readonly ModelChoice[]>([]);
   const [chats, setChats] = useState<readonly ChatSummary[]>([]);
@@ -191,7 +186,6 @@ export function App() {
   const [whenBusy, setWhenBusy] = useState<"followUp" | "steer">("followUp");
   const [uploads, setUploads] = useState<readonly AttachmentUpload[]>([]);
   const [reuseEntry, setReuseEntry] = useState<number | undefined>(undefined);
-  const [newKit, setNewKit] = useState<"chat" | "research">("chat");
   const scroll = useRef<HTMLDivElement>(null);
   const inFlight = useRef(false);
   const feedbackId = useRef<string | null>(null);
@@ -282,9 +276,7 @@ export function App() {
         if (
           known?.id === value.id &&
           known.title === value.title &&
-          known.model === value.model &&
-          known.grant.kit === value.grant.kit &&
-          known.grant.target === value.grant.target
+          known.model === value.model
         )
           return items;
 
@@ -293,7 +285,6 @@ export function App() {
             id: value.id,
             title: value.title,
             model: value.model,
-            grant: value.grant,
           },
           ...items.filter((item) => item.id !== value.id),
         ];
@@ -347,7 +338,6 @@ export function App() {
 
     if (id === null) {
       setModel("");
-      setNewKit("chat");
     }
   }
 
@@ -372,7 +362,6 @@ export function App() {
         conversationId: active,
         context: [
           page,
-          kit,
           model ? shortModel(model) : "no model",
           `${innerWidth}x${innerHeight}${standalone ? " standalone" : ""}`,
         ].join(" · "),
@@ -419,14 +408,6 @@ export function App() {
         setActive(id);
         setChats((items) => [created.success, ...items]);
         localStorage.removeItem("still:v1:draft:new");
-
-        if (newKit === "research")
-          await Effect.runPromise(
-            request(`/api/chats/${id}/kit`, Receipt, {
-              kit: "research",
-              target: null,
-            }),
-          );
       }
 
       const saved = Schema.decodeUnknownOption(
@@ -536,25 +517,9 @@ export function App() {
     [],
   );
 
-  function changeKit(kit: Grant["kit"]) {
-    if (!active) {
-      if (kit === "chat" || kit === "research") setNewKit(kit);
-      else setError("Still requires supervisor authorization.");
-
-      return;
-    }
-
-    void run(
-      request(`/api/chats/${active}/kit`, Receipt, { kit, target: null }),
-      () => {},
-    );
-  }
-
   const busy = snapshot?.busy ?? false;
   const pending = active !== null && Boolean(stored(`pending:${active}`));
   const locked = busy || Boolean(snapshot?.queued) || sending || preparing;
-  const kit = snapshot?.grant.kit ?? newKit;
-  const KitIcon = kitIcons[kit];
 
   const empty =
     !snapshot || (snapshot.messages.length === 0 && !snapshot.parent);
@@ -652,11 +617,8 @@ export function App() {
               </button>
               <div className="title">
                 <h1>{snapshot?.title ?? (active ? "Loading…" : "New chat")}</h1>
-                <p className={`subtitle kit-${kit}`} aria-live="polite">
-                  <KitIcon size={12} aria-hidden="true" />
-                  <span>
-                    {kits[kit].label} · {kits[kit].authority}
-                  </span>
+                <p className="subtitle" aria-live="polite">
+                  <span>{model ? shortModel(model) : "No model"}</span>
                   {status && <span className="status-dot">{status}</span>}
                 </p>
               </div>
@@ -665,24 +627,11 @@ export function App() {
             <div className="scroller" ref={scroll}>
               {empty ? (
                 <section className="welcome">
-                  <h2>Ask anything.</h2>
+                  <h2>What should I work on?</h2>
                   <p>
-                    Your machine, your keys. Work keeps going if you lock the
-                    phone.
+                    I run on your Mac mini: I can use the shell, edit files and
+                    search the web, and I keep working if you lock the phone.
                   </p>
-                  <ul className="kit-guide">
-                    {(["chat", "research", "still"] as const).map((item) => {
-                      const Icon = kitIcons[item];
-
-                      return (
-                        <li key={item} className={`kit-${item}`}>
-                          <Icon size={16} aria-hidden="true" />
-                          <strong>{kits[item].label}</strong>
-                          <span>{kits[item].authority}</span>
-                        </li>
-                      );
-                    })}
-                  </ul>
                   {!model && (
                     <p className="hint">Choose a model below to start.</p>
                   )}
@@ -701,27 +650,6 @@ export function App() {
               )}
             </div>
             <div className="dock">
-              {snapshot?.confirmations.map((url) => (
-                <DecisionCard
-                  key={url}
-                  url={url}
-                  onDecide={(allow) =>
-                    void run(
-                      request(`/api/chats/${active}/confirm`, Receipt, {
-                        url,
-                        allow,
-                        requestId: crypto.randomUUID(),
-                      }),
-                      () =>
-                        setDraft(
-                          allow
-                            ? `Continue with the approved URL: ${url}`
-                            : "Continue without that source.",
-                        ),
-                    )
-                  }
-                />
-              ))}
               {notice && (
                 <p className="notice" role="status">
                   {notice}
@@ -746,9 +674,6 @@ export function App() {
                 models={models}
                 model={model}
                 onModel={setModel}
-                kit={kit}
-                onKit={changeKit}
-                canChooseStill={active !== null}
                 cost={snapshot?.cost ?? 0}
                 busy={busy}
                 queued={snapshot?.queued ?? 0}

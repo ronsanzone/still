@@ -3,21 +3,16 @@ import {
   ArrowUp,
   ChevronDown,
   FileText,
-  Globe,
   Image,
-  MessageSquare,
   MessageSquareText,
-  ShieldAlert,
   Square,
   X,
 } from "lucide-react";
-import type { Grant, ModelChoice } from "../shared/contracts.ts";
+import type { ModelChoice } from "../shared/contracts.ts";
 import type { AttachmentUpload } from "../shared/attachments.ts";
 import { AttachmentChooser } from "./attachments.tsx";
 import { parseFeedback } from "../shared/feedback.ts";
-import { formatCost, kits, shortModel } from "./format.ts";
-
-const kitIcons = { chat: MessageSquare, research: Globe, still: ShieldAlert };
+import { formatCost, shortModel } from "./format.ts";
 
 export interface ComposerProps {
   readonly draft: string;
@@ -25,10 +20,6 @@ export interface ComposerProps {
   readonly models: readonly ModelChoice[];
   readonly model: string;
   readonly onModel: (value: string) => void;
-  readonly kit: Grant["kit"];
-  readonly onKit: (value: Grant["kit"]) => void;
-  /** New chats cannot request Still authority; the supervisor creates those. */
-  readonly canChooseStill: boolean;
   readonly cost: number;
   readonly busy: boolean;
   readonly queued: number;
@@ -61,7 +52,6 @@ export function sendsOnEnter(
 
 export function Composer(props: ComposerProps) {
   const field = useRef<HTMLTextAreaElement>(null);
-  const KitIcon = kitIcons[props.kit];
 
   useLayoutEffect(() => {
     const node = field.current;
@@ -191,7 +181,7 @@ export function Composer(props: ComposerProps) {
         </button>
       </div>
       <div className="context-bar">
-        {/* While answering, model and kit are locked, so Queue/Steer takes
+        {/* While answering, the model is locked, so Queue/Steer takes
             their place and the composer keeps one height for the whole turn. */}
         {props.busy ? (
           <>
@@ -237,38 +227,6 @@ export function Composer(props: ComposerProps) {
                 {props.models.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.name}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown size={14} aria-hidden="true" />
-            </label>
-            <label className={`chip kit-${props.kit}`}>
-              <KitIcon size={14} aria-hidden="true" />
-              <span className="chip-text" aria-hidden="true">
-                {kits[props.kit].label}
-              </span>
-              <select
-                aria-label="Kit"
-                value={props.kit}
-                disabled={props.locked}
-                onChange={(event) => {
-                  const value = event.target.value;
-
-                  if (
-                    value === "chat" ||
-                    value === "research" ||
-                    value === "still"
-                  )
-                    props.onKit(value);
-                }}
-              >
-                {(["chat", "research", "still"] as const).map((kit) => (
-                  <option
-                    key={kit}
-                    value={kit}
-                    disabled={kit === "still" && !props.canChooseStill}
-                  >
-                    {kits[kit].label} · {kits[kit].authority}
                   </option>
                 ))}
               </select>

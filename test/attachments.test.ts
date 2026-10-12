@@ -215,7 +215,6 @@ it("admits native image/PDF context once, preserves it in edit branches and afte
       ),
     );
     const branch = await wait(child.id);
-    expect(branch.grant.kit).toBe("chat");
     expect(branch.messages[0]?.images).toEqual(original.images);
     expect(branch.messages[0]?.attachmentText).toEqual(original.attachmentText);
     expect(requests.at(-1)?.content).toEqual([

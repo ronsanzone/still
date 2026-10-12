@@ -12,10 +12,8 @@ import {
   ChatId,
   CreateChat,
   Branch,
-  Grant,
   SendMessage,
 } from "../shared/contracts.ts";
-import { FetchDecision } from "../shared/research.ts";
 import { PushSubscription, PushEvent } from "../shared/push.ts";
 import { FeedbackInput } from "../shared/feedback.ts";
 
@@ -184,10 +182,9 @@ const route = Effect.fn("Http.route")(function* (
     return;
   }
 
-  const parts =
-    /^\/api\/chats\/(\d+)\/(events|messages|stop|kit|branch|confirm)$/.exec(
-      pathname,
-    );
+  const parts = /^\/api\/chats\/(\d+)\/(events|messages|stop|branch)$/.exec(
+    pathname,
+  );
 
   if (!parts)
     return yield* new ChatFailure({ message: "Not found.", status: 404 });
@@ -226,33 +223,6 @@ const route = Effect.fn("Http.route")(function* (
       status: 405,
     });
   const input = yield* body(request);
-
-  if (parts[2] === "confirm") {
-    json(
-      response,
-      202,
-      yield* chats.confirm(
-        id,
-        yield* Schema.decodeUnknownEffect(FetchDecision)(input),
-      ),
-    );
-
-    return;
-  }
-
-  if (parts[2] === "kit") {
-    json(
-      response,
-      202,
-      yield* chats.kit(
-        id,
-        yield* Schema.decodeUnknownEffect(Grant)(input),
-        false,
-      ),
-    );
-
-    return;
-  }
 
   if (parts[2] === "branch") {
     json(
