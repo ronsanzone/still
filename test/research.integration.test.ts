@@ -114,7 +114,8 @@ it("research records two authentic sources, requires exact confirmation, denies 
       fauxAssistantMessage(
         [
           fauxToolCall("web_fetch", { url: "https://sources.test/a" }),
-          fauxToolCall("web_fetch", { url: "https://sources.test/b" }),
+          // A www./trailing-slash variant of a search result is the same page.
+          fauxToolCall("web_fetch", { url: "https://www.sources.test/b/" }),
         ],
         { stopReason: "toolUse" },
       ),
@@ -177,12 +178,24 @@ it("research records two authentic sources, requires exact confirmation, denies 
       ]),
     ).toEqual([
       [1, "https://sources.test/a", "A"],
-      [2, "https://sources.test/b", "B"],
+      [2, "https://www.sources.test/b/", "B"],
     ]);
     expect(fetched).toEqual([
       "https://sources.test/a",
-      "https://sources.test/b",
+      "https://www.sources.test/b/",
     ]);
+
+    const searchText = view.messages.flatMap((message) =>
+      message.role === "toolResult" && message.toolName === "web_search"
+        ? message.content.flatMap((part) =>
+            part.type === "text" ? [part.text] : [],
+          )
+        : [],
+    );
+
+    // Search results are numbered sources the answer can cite directly.
+    expect(searchText.join("")).toContain('"number":1,"title":"Source A"');
+    expect(searchText.join("")).toContain('"number":2,"title":"Source B"');
     // A model-authored context summary may contribute a user-role message, but is not user authorization.
     await chat.commit(
       (tx) =>

@@ -6,8 +6,33 @@ import {
   publicAddress,
   readUrl,
   webUrl,
+  urlKey,
   ConfirmationRequired,
 } from "../src/kernel/fetch.ts";
+
+it("treats scheme, www., default port, trailing slash and fragment variants as one page", () => {
+  const key = urlKey("https://sqlite.org/releaselog/current.html");
+
+  for (const variant of [
+    "https://www.sqlite.org/releaselog/current.html",
+    "http://sqlite.org/releaselog/current.html",
+    "https://SQLite.org:443/releaselog/current.html#top",
+    "https://www.sqlite.org/releaselog/current.html/",
+  ])
+    expect(urlKey(variant)).toBe(key);
+
+  expect(urlKey("https://www.sqlite.org/")).toBe(urlKey("https://sqlite.org"));
+
+  // Different hosts, paths, queries and ports stay distinct.
+  for (const other of [
+    "https://docs.sqlite.org/releaselog/current.html",
+    "https://sqlite.org/releaselog/3_50_1.html",
+    "https://sqlite.org/releaselog/current.html?x=1",
+    "https://sqlite.org:8443/releaselog/current.html",
+    "https://wwwsqlite.org/releaselog/current.html",
+  ])
+    expect(urlKey(other)).not.toBe(key);
+});
 
 it("rejects private, metadata, tailnet, reserved and mapped addresses including alternate encodings", async () => {
   for (const host of [
