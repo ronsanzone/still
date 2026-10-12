@@ -11,7 +11,6 @@ import {
   Wrench,
 } from "lucide-react";
 import type { ChatSnapshot, Message } from "../shared/contracts.ts";
-import { apiPath } from "./api.ts";
 import { AttachmentDisplay } from "./attachments.tsx";
 import { formatCost, shortModel } from "./format.ts";
 
@@ -504,7 +503,7 @@ function SourceRow({
         {pdf && (
           <a
             className="download"
-            href={apiPath(`/api/chats/${snapshot.id}/attachments/${hash}`)}
+            href={`/api/chats/${snapshot.id}/attachments/${hash}`}
           >
             <Download size={14} aria-hidden="true" /> Original PDF
           </a>

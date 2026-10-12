@@ -29,7 +29,7 @@ import {
   type Message,
   type ModelChoice,
 } from "../shared/contracts.ts";
-import { apiPath, request, RequestFailure } from "./api.ts";
+import { request, RequestFailure } from "./api.ts";
 import type { AttachmentUpload } from "../shared/attachments.ts";
 import { parseFeedback } from "../shared/feedback.ts";
 import { Composer } from "./composer.tsx";
@@ -254,7 +254,7 @@ export function App() {
 
     if (!active) return;
     let first = true;
-    const events = new EventSource(apiPath(`/api/chats/${active}/events`));
+    const events = new EventSource(`/api/chats/${active}/events`);
     events.onmessage = (event) => {
       const decoded = Schema.decodeUnknownOption(
         Schema.fromJsonString(ChatSnapshot),

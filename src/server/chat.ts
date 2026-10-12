@@ -41,7 +41,6 @@ import {
   type SendMessage,
   Work,
 } from "../shared/contracts.ts";
-import type { BuilderAdmission } from "../shared/builder.ts";
 import { ModelCatalog } from "./models.ts";
 import { ChatServices } from "./services.ts";
 import { Attachments, AttachmentEntry } from "../kernel/attachments.ts";
@@ -180,13 +179,6 @@ export class Chats extends Context.Service<
       Schema.Schema.Type<typeof Work>,
       ChatFailure
     >;
-    // Protected supervisor bridge retained until ReleaseHost/passkey replacement, not a product surface.
-    readonly builder: (
-      input: BuilderAdmission,
-    ) => Effect.Effect<{ id: number }, ChatFailure | Schema.SchemaError>;
-    readonly builderCandidate: (
-      id: number,
-    ) => Effect.Effect<string, ChatFailure | Schema.SchemaError>;
     readonly extensions: readonly string[];
     readonly confirm: (
       id: number,
@@ -625,73 +617,6 @@ export class Chats extends Context.Service<
         );
       });
 
-      const builderCandidate = Effect.fn("Chat.target")(function* (id: number) {
-        const handle = yield* conversation(id);
-
-        const grant = yield* attempt(() =>
-          harness.snapshot(GrantDoc, handle.id, context),
-        );
-
-        return grant?.target ?? "";
-      });
-
-      const builder = Effect.fn("Still.admitCandidate")(function* (
-        input: BuilderAdmission,
-      ) {
-        const existing = (yield* list()).find(
-          (item) => item.grant.target === input.candidate,
-        );
-
-        let id = existing?.id;
-
-        if (id === undefined) {
-          // Candidate identity is authoritative in the supervisor journal, not a second conversation store.
-          id = yield* attempt(() =>
-            harness.commit(async (tx) => {
-              const selected = modelRef(input.model);
-
-              const created = await tx.createConversation({
-                ownership: { kind: "ownerless" },
-              });
-
-              const grant = await tx.doc(GrantDoc, created.id);
-              grant.kit = "still";
-              grant.target = input.candidate;
-              await selectKit(tx, created.id, grant, root);
-              await configure(tx, created.id, {
-                model: selected,
-                thinkingLevel: "low",
-              });
-              await tx.appendEntry(KitChange, created.id, {
-                data: { from: "chat", to: "still", target: input.candidate },
-              });
-
-              return created.id;
-            }, context),
-          );
-        } else {
-          const handle = yield* conversation(id);
-          const view = yield* attempt(() => handle.context(context));
-
-          const first = view.entries
-            .flatMap((entry) => entry.model ?? [])
-            .find((item) => item.role === "user");
-
-          if (
-            existing?.model !== input.model ||
-            (first && first.content !== input.text)
-          )
-            return yield* new ChatFailure({
-              message: "Candidate already belongs to another task/model.",
-              status: 409,
-            });
-        }
-
-        yield* send(id, { text: input.text, requestId: input.requestId });
-
-        return { id };
-      });
-
       const stop = Effect.fn("Chat.stop")(function* (id: number) {
         const handle = yield* conversation(id);
         yield* attempt(() => handle.abort(context));
@@ -907,8 +832,6 @@ export class Chats extends Context.Service<
           kit(id, input, supervisor).pipe(admission.withPermits(1)),
         send: (id, input) => send(id, input).pipe(admission.withPermits(1)),
         branch: (id, input) => branch(id, input).pipe(admission.withPermits(1)),
-        builder: (input) => builder(input).pipe(admission.withPermits(1)),
-        builderCandidate,
         stop,
         watch,
         work,

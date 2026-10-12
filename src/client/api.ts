@@ -9,12 +9,6 @@ import {
   type SendMessage,
 } from "../shared/contracts.ts";
 
-export function apiPath(path: string) {
-  const preview = /^\/builder-preview\/[a-f0-9]{64}/.exec(location.pathname);
-
-  return preview ? `${preview[0]}${path}` : path;
-}
-
 export class RequestFailure extends Schema.TaggedError<RequestFailure>()(
   "RequestFailure",
   {
@@ -41,7 +35,7 @@ export const request = Effect.fn("Api.request")(function* <A>(
   const response = yield* Effect.tryPromise({
     try: (signal) =>
       fetch(
-        apiPath(path),
+        path,
         payload
           ? {
               method: "POST",

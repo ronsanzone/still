@@ -8,11 +8,9 @@
   },
   "scripts": {
     "dev": "node --import tsx src/server/main.ts",
-    "host": "node --import tsx src/host/main.ts",
-    "builder:demo": "node --import tsx tools/builder-demo.ts",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint --threads=2 src test tools/builder-demo.ts vite.config.ts oxlint.config.ts $(if [ -d extensions ]; then printf extensions; fi)",
+    "lint": "oxlint --threads=2 src test vite.config.ts oxlint.config.ts $(if [ -d extensions ]; then printf extensions; fi)",
     "format": "prettier --write src test *.ts *.json index.html",
     "test": "vitest run --maxWorkers=2",
     "check": "npm run typecheck && npm run lint && npm test && npm run build"

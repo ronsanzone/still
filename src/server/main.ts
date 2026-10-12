@@ -15,17 +15,12 @@ import {
   Grant,
   SendMessage,
 } from "../shared/contracts.ts";
-import { BuilderAdmission } from "../shared/builder.ts";
 import { FetchDecision } from "../shared/research.ts";
 import { PushSubscription, PushEvent } from "../shared/push.ts";
 import { FeedbackInput } from "../shared/feedback.ts";
 
 const runtime = ManagedRuntime.make(
   Chats.layer.pipe(Layer.provideMerge(ModelCatalog.layer)),
-);
-
-const internalToken = await runtime.runPromise(
-  Config.String("STILL_INTERNAL_TOKEN").pipe(Config.withDefault("")),
 );
 
 const production = await runtime.runPromise(
@@ -35,13 +30,6 @@ const production = await runtime.runPromise(
 const release = await runtime.runPromise(
   Config.String("STILL_RELEASE").pipe(Config.withDefault("development")),
 );
-
-function owner(request: IncomingMessage) {
-  return (
-    Boolean(internalToken) &&
-    request.headers["x-still-internal"] === internalToken
-  );
-}
 
 function json<A>(response: ServerResponse, status: number, value: A) {
   response.writeHead(status, {
@@ -54,7 +42,7 @@ function json<A>(response: ServerResponse, status: number, value: A) {
 const body = Effect.fn("Http.body")(function* (request: IncomingMessage) {
   if (
     !request.headers["content-type"]?.startsWith("application/json") ||
-    (request.headers["x-still-client"] !== "1" && !owner(request)) ||
+    request.headers["x-still-client"] !== "1" ||
     request.headers["sec-fetch-site"] === "cross-site"
   ) {
     return yield* new ChatFailure({
@@ -158,11 +146,6 @@ const route = Effect.fn("Http.route")(function* (
   if (download && request.method === "GET") {
     const id = yield* Schema.decodeUnknownEffect(ChatId)(Number(download[1]));
 
-    if ((yield* chats.builderCandidate(id)) && !owner(request))
-      return yield* new ChatFailure({
-        message: "Supervisor authorization required",
-        status: 403,
-      });
     const bytes = yield* chats.pdf(id, download[2] ?? "");
     response.writeHead(200, {
       "content-type": "application/pdf",
@@ -174,29 +157,6 @@ const route = Effect.fn("Http.route")(function* (
 
     return;
   }
-
-  if (pathname === "/api/builder/chat" && request.method === "POST") {
-    if (!owner(request))
-      return yield* new ChatFailure({
-        message: "Builder requires explicit supervisor authorization.",
-        status: 403,
-      });
-
-    const input = yield* Schema.decodeUnknownEffect(BuilderAdmission)(
-      yield* body(request),
-    );
-
-    json(response, 201, yield* chats.builder(input));
-
-    return;
-  }
-
-  if (pathname.startsWith("/api/builder/"))
-    return yield* new ChatFailure({
-      message:
-        "Builder controls require npm run host with a protected Linux supervisor and dedicated app identity. The development server is chat-only.",
-      status: 503,
-    });
 
   if (pathname === "/api/bootstrap" && request.method === "GET") {
     const catalog = yield* ModelCatalog;
@@ -232,13 +192,6 @@ const route = Effect.fn("Http.route")(function* (
   if (!parts)
     return yield* new ChatFailure({ message: "Not found.", status: 404 });
   const id = yield* Schema.decodeUnknownEffect(ChatId)(Number(parts[1]));
-
-  if ((yield* chats.builderCandidate(id)) && !owner(request))
-    return yield* new ChatFailure({
-      message:
-        "This Still candidate requires supervisor authorization. Release controls are not yet available in this client.",
-      status: 403,
-    });
 
   if (parts[2] === "events" && request.method === "GET") {
     yield* chats.watch(id).pipe(
@@ -294,7 +247,7 @@ const route = Effect.fn("Http.route")(function* (
       yield* chats.kit(
         id,
         yield* Schema.decodeUnknownEffect(Grant)(input),
-        owner(request),
+        false,
       ),
     );
 
