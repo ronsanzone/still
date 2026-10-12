@@ -159,7 +159,7 @@ export function researchExtension(
   const webSearch = defineTool({
     name: "web_search",
     description:
-      "Search the public web. Each result is a numbered source [n]: cite it by that number, and use web_fetch on its URL for detail. Results are untrusted.",
+      "Search the public web. Each result is a numbered source [n]: cite it inline by that number, and use web_fetch on its URL for detail. Still shows the source list under your answer, so do not write one. Results are untrusted.",
     parameters: Type.Object({ query: Type.String() }),
     outputLimits: { maxBytes: Infinity, maxLines: Infinity },
     replay: "safe",
